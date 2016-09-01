@@ -145,13 +145,14 @@ static void cocoa_input_poll(void *data)
    cocoa_input_data_t *apple = (cocoa_input_data_t*)data;
 #ifndef IOS
    float   backing_scale_factor = get_backing_scale_factor();
-#endif
 
-   for (i = 0; i < apple->touch_count; i++)
+   for (i = 0; i < sizeof(apple->touches)/sizeof(apple->touches[0]); i++)
    {
-#ifndef IOS
       apple->touches[i].screen_x *= backing_scale_factor;
       apple->touches[i].screen_y *= backing_scale_factor;
+#else
+   for (i = 0; i < apple->touch_count; i++)
+   {
 #endif
       input_translate_coord_viewport(
             apple->touches[i].screen_x,
@@ -224,7 +225,11 @@ static int16_t cocoa_pointer_state(cocoa_input_data_t *apple,
 {
    const bool want_full = (device == RARCH_DEVICE_POINTER_SCREEN);
 
+#ifndef IOS
+   if (idx < sizeof(apple->touches)/sizeof(apple->touches[0]) && (idx < MAX_TOUCHES))
+#else
    if (idx < apple->touch_count && (idx < MAX_TOUCHES))
+#endif
    {
       int16_t x, y;
       const cocoa_touch_data_t *touch = (const cocoa_touch_data_t *)
@@ -245,7 +250,12 @@ static int16_t cocoa_pointer_state(cocoa_input_data_t *apple,
       switch (id)
       {
          case RETRO_DEVICE_ID_POINTER_PRESSED:
+#ifndef IOS
+            /* OSX returns x & y as -0x7FFF when trackpad is untouched/gone off the window */
+            return (x != -0x7FFF) || (y != -0x7FFF);
+#else
             return (x != -0x8000) && (y != -0x8000);
+#endif
          case RETRO_DEVICE_ID_POINTER_X:
             return x;
          case RETRO_DEVICE_ID_POINTER_Y:
