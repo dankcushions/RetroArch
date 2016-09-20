@@ -426,6 +426,12 @@ if [ "$HAVE_VULKAN" != 'no' ] && [ ! -e deps/SPIRV-Cross/README.md ]; then
 	HAVE_VULKAN=no
 fi
 
+if [ "$GLSL_OPTIMIZER" != 'no' ] && [ ! -e deps/glsl-optimizer/README.md ]; then
+   echo "Warning: glsl-optimizer submodule not loaded, can't use glsl-optimizer."
+   echo "To fix, use:  git submodule init && git submodule update"
+   GLSL_OPTIMIZER=no
+fi
+
 check_pkgconf PYTHON python3
 
 if [ "$HAVE_MATERIALUI" != 'no' ] || [ "$HAVE_XMB" != 'no' ] || [ "$HAVE_ZARCH" != 'no' ]; then

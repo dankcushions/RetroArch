@@ -37,6 +37,10 @@
 #include "../../managers/state_manager.h"
 #include "../../core.h"
 
+#ifdef GLSL_OPTIMIZER
+#include "glsl_optimizer.h"
+#endif
+
 #define PREV_TEXTURES (GFX_MAX_TEXTURES - 1)
 
 /* Cache the VBO. */
@@ -278,7 +282,29 @@ static bool gl_glsl_compile_shader(glsl_shader_data_t *glsl,
    source[2] = glsl->alias_define;
    source[3] = program;
 
-   glShaderSource(shader, ARRAY_SIZE(source), source, NULL);
+#ifdef GLSL_OPTIMIZER
+//#ifdef HAVE_OPENGLES
+   // should target GLES versions, metal etc.
+   RARCH_LOG("Optimizing shader using glsl-optimizer.\n");
+   glslopt_shader_type type;
+   GLint _type;
+   glGetShaderiv(shader, GL_SHADER_TYPE, &_type);
+   if (_type == GL_VERTEX_SHADER)
+      type = kGlslOptShaderVertex;
+   else if (_type == GL_FRAGMENT_SHADER)
+      type = kGlslOptShaderFragment;
+   glslopt_shader* new_shader = glslopt_optimize (glsl_core, type, source, 0);
+   if (glslopt_get_status (new_shader)) {
+      const char* newSource = glslopt_get_output (new_shader);
+      glShaderSource(shader, ARRAY_SIZE(&newSource), &newSource, NULL);
+   } else
+      RARCH_ERR("%s\n", glslopt_get_log (new_shader));
+   glslopt_shader_delete (new_shader);
+//#else
+//   glShaderSource(shader, ARRAY_SIZE(source), source, NULL);
+//#endif
+#endif
+   
    glCompileShader(shader);
 
    glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
@@ -324,7 +350,6 @@ static bool gl_glsl_compile_program(
    {
       RARCH_LOG("Found GLSL vertex shader.\n");
       program->vprg = glCreateShader(GL_VERTEX_SHADER);
-
       if (!gl_glsl_compile_shader(
                glsl,
                program->vprg,
@@ -674,6 +699,10 @@ static void gl_glsl_destroy_resources(glsl_shader_data_t *glsl)
       free(glsl->vbo[i].buffer_secondary);
    }
    memset(&glsl->vbo, 0, sizeof(glsl->vbo));
+   
+#ifdef GLSL_OPTIMIZER
+   glslopt_cleanup(glsl_core);
+#endif
 }
 
 static void gl_glsl_deinit(void *data)

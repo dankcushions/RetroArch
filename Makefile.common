@@ -886,6 +886,118 @@ ifeq ($(HAVE_VULKAN), 1)
    LIBS += -lstdc++
 endif
 
+ifeq ($(GLSL_OPTIMIZER), 1)
+   DEFINES += -DHAVE_GLSL
+
+   SOURCES_C += \
+      deps/glsl-optimizer/src/glsl/glcpp/glcpp-lex.c \
+      deps/glsl-optimizer/src/glsl/glcpp/pp.c \
+      deps/glsl-optimizer/src/glsl/glcpp/glcpp-parse.c \
+      deps/glsl-optimizer/src/util/ralloc.c \
+      deps/glsl-optimizer/src/util/hash_table.c \
+      deps/glsl-optimizer/src/mesa/program/symbol_table.c \
+      deps/glsl-optimizer/src/mesa/program/prog_hash_table.c \
+      deps/glsl-optimizer/src/mesa/main/imports.c \
+      deps/glsl-optimizer/src/glsl/strtod.c
+
+   SOURCES_CXX += \
+      deps/glsl-optimizer/src/glsl/opt_copy_propagation_elements.cpp \
+      deps/glsl-optimizer/src/glsl/opt_constant_folding.cpp \
+      deps/glsl-optimizer/src/glsl/s_expression.cpp \
+      deps/glsl-optimizer/src/glsl/opt_constant_propagation.cpp \
+      deps/glsl-optimizer/src/glsl/lower_ubo_reference.cpp \
+      deps/glsl-optimizer/src/glsl/glsl_parser.cpp \
+      deps/glsl-optimizer/src/glsl/lower_variable_index_to_cond_assign.cpp \
+      deps/glsl-optimizer/src/glsl/ir_function_can_inline.cpp \
+      deps/glsl-optimizer/src/glsl/ir_unused_structs.cpp \
+      deps/glsl-optimizer/src/glsl/ir_print_visitor.cpp \
+      deps/glsl-optimizer/src/glsl/ir_constant_expression.cpp \
+      deps/glsl-optimizer/src/glsl/glsl_parser_extras.cpp \
+      deps/glsl-optimizer/src/glsl/hir_field_selection.cpp \
+      deps/glsl-optimizer/src/glsl/lower_noise.cpp \
+      deps/glsl-optimizer/src/glsl/opt_dead_code_local.cpp \
+      deps/glsl-optimizer/src/glsl/opt_if_simplification.cpp \
+      deps/glsl-optimizer/src/glsl/builtin_types.cpp \
+      deps/glsl-optimizer/src/glsl/lower_vector_insert.cpp \
+      deps/glsl-optimizer/src/glsl/lower_packing_builtins.cpp \
+      deps/glsl-optimizer/src/glsl/ast_to_hir.cpp \
+      deps/glsl-optimizer/src/glsl/link_uniforms.cpp \
+      deps/glsl-optimizer/src/glsl/lower_vector.cpp \
+      deps/glsl-optimizer/src/glsl/ir_equals.cpp \
+      deps/glsl-optimizer/src/glsl/ir_builder.cpp \
+      deps/glsl-optimizer/src/glsl/opt_redundant_jumps.cpp \
+      deps/glsl-optimizer/src/glsl/ir_validate.cpp \
+      deps/glsl-optimizer/src/glsl/opt_vectorize.cpp \
+      deps/glsl-optimizer/src/glsl/ir_rvalue_visitor.cpp \
+      deps/glsl-optimizer/src/glsl/ir_expression_flattening.cpp \
+      deps/glsl-optimizer/src/glsl/opt_tree_grafting.cpp \
+      deps/glsl-optimizer/src/glsl/opt_noop_swizzle.cpp \
+      deps/glsl-optimizer/src/glsl/lower_clip_distance.cpp \
+      deps/glsl-optimizer/src/glsl/ir_import_prototypes.cpp \
+      deps/glsl-optimizer/src/glsl/ir.cpp \
+      deps/glsl-optimizer/src/glsl/lower_vertex_id.cpp \
+      deps/glsl-optimizer/src/glsl/link_atomics.cpp \
+      deps/glsl-optimizer/src/glsl/opt_rebalance_tree.cpp \
+      deps/glsl-optimizer/src/glsl/opt_minmax.cpp \
+      deps/glsl-optimizer/src/glsl/opt_dead_builtin_variables.cpp \
+      deps/glsl-optimizer/src/glsl/lower_vec_index_to_swizzle.cpp \
+      deps/glsl-optimizer/src/glsl/loop_unroll.cpp \
+      deps/glsl-optimizer/src/glsl/opt_dead_code.cpp \
+      deps/glsl-optimizer/src/glsl/ast_expr.cpp \
+      deps/glsl-optimizer/src/glsl/loop_controls.cpp \
+      deps/glsl-optimizer/src/glsl/linker.cpp \
+      deps/glsl-optimizer/src/glsl/opt_function_inlining.cpp \
+      deps/glsl-optimizer/src/glsl/lower_mat_op_to_vec.cpp \
+      deps/glsl-optimizer/src/glsl/ir_function_detect_recursion.cpp \
+      gfx/drivers_shader/glsl_optimizer.cpp \
+      deps/glsl-optimizer/src/glsl/link_uniform_blocks.cpp \
+      deps/glsl-optimizer/src/glsl/opt_swizzle_swizzle.cpp \
+      deps/glsl-optimizer/src/glsl/link_functions.cpp \
+      deps/glsl-optimizer/src/glsl/lower_output_reads.cpp \
+      deps/glsl-optimizer/src/glsl/ir_function.cpp \
+      deps/glsl-optimizer/src/glsl/lower_named_interface_blocks.cpp \
+      deps/glsl-optimizer/src/glsl/loop_analysis.cpp \
+      deps/glsl-optimizer/src/glsl/ir_stats.cpp \
+      deps/glsl-optimizer/src/glsl/opt_algebraic.cpp \
+      deps/glsl-optimizer/src/glsl/ir_variable_refcount.cpp \
+      deps/glsl-optimizer/src/glsl/ast_array_index.cpp \
+      deps/glsl-optimizer/src/glsl/ir_hierarchical_visitor.cpp \
+      deps/glsl-optimizer/src/glsl/opt_cse.cpp \
+      deps/glsl-optimizer/src/glsl/builtin_variables.cpp \
+      deps/glsl-optimizer/src/glsl/ast_type.cpp \
+      deps/glsl-optimizer/src/glsl/link_varyings.cpp \
+      deps/glsl-optimizer/src/glsl/glsl_types.cpp \
+      deps/glsl-optimizer/src/glsl/opt_dead_builtin_varyings.cpp \
+      deps/glsl-optimizer/src/glsl/ir_print_glsl_visitor.cpp \
+      deps/glsl-optimizer/src/glsl/ir_print_metal_visitor.cpp \
+      deps/glsl-optimizer/src/glsl/lower_offset_array.cpp \
+      deps/glsl-optimizer/src/glsl/link_uniform_initializers.cpp \
+      deps/glsl-optimizer/src/glsl/opt_constant_variable.cpp \
+      deps/glsl-optimizer/src/glsl/builtin_functions.cpp \
+      deps/glsl-optimizer/src/glsl/ast_function.cpp \
+      deps/glsl-optimizer/src/glsl/opt_dead_functions.cpp \
+      deps/glsl-optimizer/src/glsl/ir_basic_block.cpp \
+      deps/glsl-optimizer/src/glsl/lower_if_to_cond_assign.cpp \
+      deps/glsl-optimizer/src/glsl/link_interface_blocks.cpp \
+      deps/glsl-optimizer/src/glsl/opt_structure_splitting.cpp \
+      deps/glsl-optimizer/src/glsl/lower_vec_index_to_cond_assign.cpp \
+      deps/glsl-optimizer/src/glsl/ir_hv_accept.cpp \
+      deps/glsl-optimizer/src/glsl/ir_clone.cpp \
+      deps/glsl-optimizer/src/glsl/opt_flip_matrices.cpp \
+      deps/glsl-optimizer/src/glsl/standalone_scaffolding.cpp \
+      deps/glsl-optimizer/src/glsl/opt_array_splitting.cpp \
+      deps/glsl-optimizer/src/glsl/lower_discard.cpp \
+      deps/glsl-optimizer/src/glsl/lower_packed_varyings.cpp \
+      deps/glsl-optimizer/src/glsl/lower_discard_flow.cpp \
+      deps/glsl-optimizer/src/glsl/opt_copy_propagation.cpp \
+      deps/glsl-optimizer/src/glsl/lower_jumps.cpp \
+      deps/glsl-optimizer/src/glsl/lower_instructions.cpp \
+      deps/glsl-optimizer/src/glsl/glsl_lexer.cpp \
+      deps/glsl-optimizer/src/glsl/link_uniform_block_active_visitor.cpp \
+      deps/glsl-optimizer/src/glsl/opt_flatten_nested_if_blocks.cpp \
+      deps/glsl-optimizer/src/glsl/glsl_symbol_table.cpp
+endif
+
 ifeq ($(HAVE_BUILTIN_AUTOCONFIG), 1)
    OBJ += input/input_autodetect_builtin.o
    DEFINES += -DHAVE_BUILTIN_AUTOCONFIG
