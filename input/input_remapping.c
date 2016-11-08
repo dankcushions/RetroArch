@@ -20,6 +20,7 @@
 
 #include "input_remapping.h"
 #include "../configuration.h"
+#include "../retroarch.h"
 #include "../runloop.h"
 
 /**
@@ -35,7 +36,7 @@ bool input_remapping_load_file(void *data, const char *path)
    unsigned i, j;
    config_file_t *conf  = (config_file_t*)data;
    settings_t *settings = config_get_ptr();
-   global_t   *global   = global_get_ptr();
+   global_t *global     = global_get_ptr();
 
    if (!conf ||  string_is_empty(path))
       return false;
@@ -88,7 +89,7 @@ bool input_remapping_load_file(void *data, const char *path)
       snprintf(buf, sizeof(buf), "input_player%u_analog_dpad_mode", i + 1);
       CONFIG_GET_INT_BASE(conf, settings, input.analog_dpad_mode[i], buf);
 
-      if (!global->has_set.libretro_device[i])
+      if (!retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE, &i))
       {
          snprintf(buf, sizeof(buf), "input_libretro_device_p%u", i + 1);
          CONFIG_GET_INT_BASE(conf, settings, input.libretro_device[i], buf);
@@ -189,29 +190,5 @@ void input_remapping_set_defaults(void)
          settings->input.remap_ids[i][j] = settings->input.binds[i][j].id;
       for (j = 0; j < 4; j++)
          settings->input.remap_ids[i][RARCH_FIRST_CUSTOM_BIND + j] = j;
-   }
-}
-
-void input_remapping_state(unsigned port,
-      unsigned *device, unsigned *idx, unsigned *id)
-{
-   settings_t *settings = config_get_ptr();
-
-   switch (*device)
-   {
-      case RETRO_DEVICE_JOYPAD:
-         if (*id < RARCH_FIRST_CUSTOM_BIND)
-            *id = settings->input.remap_ids[port][*id];
-         break;
-      case RETRO_DEVICE_ANALOG:
-         if (*idx < 2 && *id < 2)
-         {
-            unsigned new_id = RARCH_FIRST_CUSTOM_BIND + (*idx * 2 + *id);
-
-            new_id = settings->input.remap_ids[port][new_id];
-            *idx   = (new_id & 2) >> 1;
-            *id    = new_id & 1;
-         }
-         break;
    }
 }

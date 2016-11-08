@@ -80,6 +80,11 @@ static int deferred_push_achievement_list(menu_displaylist_info_t *info)
    return deferred_push_dlist(info, DISPLAYLIST_ACHIEVEMENT_LIST);
 }
 
+static int deferred_push_achievement_list_hardcore(menu_displaylist_info_t *info)
+{
+   return deferred_push_dlist(info, DISPLAYLIST_ACHIEVEMENT_LIST_HARDCORE);
+}
+
 static int deferred_push_rdb_collection(menu_displaylist_info_t *info)
 {
    return deferred_push_dlist(info, DISPLAYLIST_PLAYLIST_COLLECTION);
@@ -170,6 +175,11 @@ static int deferred_push_updater_settings_list(menu_displaylist_info_t *info)
    return deferred_push_dlist(info, DISPLAYLIST_UPDATER_SETTINGS_LIST);
 }
 
+static int deferred_push_wifi_settings_list(menu_displaylist_info_t *info)
+{
+   return deferred_push_dlist(info, DISPLAYLIST_WIFI_SETTINGS_LIST);
+}
+
 static int deferred_push_network_settings_list(menu_displaylist_info_t *info)
 {
    return deferred_push_dlist(info, DISPLAYLIST_NETWORK_SETTINGS_LIST);
@@ -203,6 +213,11 @@ static int deferred_push_audio_settings_list(menu_displaylist_info_t *info)
 static int deferred_push_input_settings_list(menu_displaylist_info_t *info)
 {
    return deferred_push_dlist(info, DISPLAYLIST_INPUT_SETTINGS_LIST);
+}
+
+static int deferred_push_recording_settings_list(menu_displaylist_info_t *info)
+{
+   return deferred_push_dlist(info, DISPLAYLIST_RECORDING_SETTINGS_LIST);
 }
 
 static int deferred_push_playlist_settings_list(menu_displaylist_info_t *info)
@@ -282,6 +297,11 @@ static int deferred_push_options(menu_displaylist_info_t *info)
    return deferred_push_dlist(info, DISPLAYLIST_OPTIONS);
 }
 
+static int deferred_push_netplay(menu_displaylist_info_t *info)
+{
+   return deferred_push_dlist(info, DISPLAYLIST_NETPLAY);
+}
+
 static int deferred_push_content_settings(menu_displaylist_info_t *info)
 {
    return deferred_push_dlist(info, DISPLAYLIST_CONTENT_SETTINGS);
@@ -290,6 +310,11 @@ static int deferred_push_content_settings(menu_displaylist_info_t *info)
 static int deferred_push_add_content_list(menu_displaylist_info_t *info)
 {
    return deferred_push_dlist(info, DISPLAYLIST_ADD_CONTENT_LIST);
+}
+
+static int deferred_push_configurations_list(menu_displaylist_info_t *info)
+{
+   return deferred_push_dlist(info, DISPLAYLIST_CONFIGURATIONS_LIST);
 }
 
 static int deferred_push_load_content_list(menu_displaylist_info_t *info)
@@ -383,7 +408,7 @@ static int deferred_archive_action(menu_displaylist_info_t *info)
 static int deferred_push_cursor_manager_list_deferred(
       menu_displaylist_info_t *info)
 {
-   char rdb_path[PATH_MAX_LENGTH] = {0};
+   char rdb_path[PATH_MAX_LENGTH];
    int ret                        = -1;
    char *query                    = NULL;
    char *rdb                      = NULL;
@@ -398,6 +423,8 @@ static int deferred_push_cursor_manager_list_deferred(
 
    if (!config_get_string(conf, "rdb", &rdb))
       goto end;
+
+   rdb_path[0] = '\0';
 
    fill_pathname_join(rdb_path, settings->path.content_database,
          rdb, sizeof(rdb_path));
@@ -421,8 +448,10 @@ static int deferred_push_cursor_manager_list_deferred_query_subsearch(
 {
    int ret                       = -1;
 #ifdef HAVE_LIBRETRODB
-   char query[PATH_MAX_LENGTH]   = {0};
+   char query[PATH_MAX_LENGTH];
    struct string_list *str_list  = string_split(info->path, "|"); 
+
+   query[0] = '\0';
 
    database_info_build_query(query, sizeof(query),
          info->label, str_list->elems[0].data);
@@ -752,6 +781,12 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
       return 0;
    }
 
+   if (string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_WIFI_SETTINGS_LIST)))
+   {
+      BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_wifi_settings_list);
+      return 0;
+   }
+
    if (string_is_equal(label, msg_hash_to_str(MENU_ENUM_LABEL_DEFERRED_LAKKA_SERVICES_LIST)))
    {
       BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_lakka_services_list);
@@ -821,6 +856,9 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
                break;
             case MENU_ENUM_LABEL_DEFERRED_PLAYLIST_SETTINGS_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_playlist_settings_list);
+               break;
+            case MENU_ENUM_LABEL_DEFERRED_RECORDING_SETTINGS_LIST:
+               BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_recording_settings_list);
                break;
             case MENU_ENUM_LABEL_DEFERRED_INPUT_HOTKEY_BINDS_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_input_hotkey_binds_list);
@@ -894,11 +932,17 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
             case MENU_ENUM_LABEL_ONLINE_UPDATER:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_options);
                break;
+            case MENU_ENUM_LABEL_NETPLAY:
+               BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_netplay);
+               break;
             case MENU_ENUM_LABEL_CONTENT_SETTINGS:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_content_settings);
                break;
             case MENU_ENUM_LABEL_ADD_CONTENT_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_add_content_list);
+               break;
+            case MENU_ENUM_LABEL_CONFIGURATIONS_LIST:
+               BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_configurations_list);
                break;
             case MENU_ENUM_LABEL_LOAD_CONTENT_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_load_content_list);
@@ -956,6 +1000,9 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
                break;
             case MENU_ENUM_LABEL_ACHIEVEMENT_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_achievement_list);
+               break;
+            case MENU_ENUM_LABEL_ACHIEVEMENT_LIST_HARDCORE:
+               BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_achievement_list_hardcore);
                break;
             case MENU_ENUM_LABEL_CORE_COUNTERS:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_core_counters);
@@ -1062,6 +1109,9 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
       {
          switch (label_hash)
          {
+            case MENU_LABEL_DEFERRED_CONFIGURATIONS_LIST:
+               BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_configurations_list);
+               break;
             case MENU_LABEL_DEFERRED_USER_BINDS_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_user_binds_list);
                break;
@@ -1082,6 +1132,9 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
                break;
             case MENU_LABEL_DEFERRED_PLAYLIST_SETTINGS_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_playlist_settings_list);
+               break;
+            case MENU_LABEL_DEFERRED_RECORDING_SETTINGS_LIST:
+               BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_recording_settings_list);
                break;
             case MENU_LABEL_DEFERRED_INPUT_HOTKEY_BINDS_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_input_hotkey_binds_list);
@@ -1145,6 +1198,9 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
             case MENU_LABEL_ONLINE_UPDATER:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_options);
                break;
+            case MENU_LABEL_NETPLAY:
+               BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_netplay);
+               break;
             case MENU_LABEL_CONTENT_SETTINGS:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_content_settings);
                break;
@@ -1207,6 +1263,9 @@ static int menu_cbs_init_bind_deferred_push_compare_label(
                break;
             case MENU_LABEL_ACHIEVEMENT_LIST:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_achievement_list);
+               break;
+            case MENU_LABEL_ACHIEVEMENT_LIST_HARDCORE:
+               BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_achievement_list_hardcore);
                break;
             case MENU_LABEL_CORE_COUNTERS:
                BIND_ACTION_DEFERRED_PUSH(cbs, deferred_push_core_counters);

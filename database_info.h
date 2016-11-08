@@ -2,7 +2,8 @@
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
  *  Copyright (C) 2013-2015 - Jason Fetters
- * 
+ *  Copyright (C) 2016 - Brad Parker
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -24,12 +25,6 @@
 #include <file/archive_file.h>
 #include <retro_common_api.h>
 
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
-
-#include "libretro-db/libretrodb.h"
-
 RETRO_BEGIN_DECLS
 
 enum database_status
@@ -46,11 +41,12 @@ enum database_type
 {
    DATABASE_TYPE_NONE = 0,
    DATABASE_TYPE_ITERATE,
-   DATABASE_TYPE_ITERATE_ZIP,
+   DATABASE_TYPE_ITERATE_ARCHIVE,
    DATABASE_TYPE_ITERATE_LUTRO,
    DATABASE_TYPE_SERIAL_LOOKUP,
    DATABASE_TYPE_CRC_LOOKUP
 };
+
 
 typedef struct
 {
@@ -58,9 +54,7 @@ typedef struct
    enum database_type type;
    size_t list_ptr;
    struct string_list *list;
-#ifdef HAVE_ZLIB
    file_archive_transfer_t state;
-#endif
 } database_info_handle_t;
 
 typedef struct
@@ -104,6 +98,19 @@ typedef struct
    size_t count;
 } database_info_list_t;
 
+typedef struct database_state_handle
+{
+   database_info_list_t *info;
+   struct string_list *list;
+   size_t list_index;
+   size_t entry_index;
+   uint32_t crc;
+   uint32_t archive_crc;
+   uint8_t *buf;
+   char archive_name[255];
+   char serial[4096];
+} database_state_handle_t;
+
 database_info_list_t *database_info_list_new(const char *rdb_path,
       const char *query);
 
@@ -114,6 +121,14 @@ database_info_handle_t *database_info_dir_init(const char *dir,
 
 database_info_handle_t *database_info_file_init(const char *path,
       enum database_type type);
+
+void database_info_set_type(database_info_handle_t *handle, enum database_type type);
+
+const char *database_info_get_current_element_name(database_info_handle_t *handle);
+
+const char *database_info_get_current_name(database_state_handle_t *handle);
+
+enum database_type database_info_get_type(database_info_handle_t *handle);
 
 void database_info_free(database_info_handle_t *handle);
 

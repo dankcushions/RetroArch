@@ -17,6 +17,7 @@
 #include <string.h>
 
 #include <compat/strl.h>
+#include <string/stdstring.h>
 
 #ifdef HAVE_CONFIG_H
 #include "../config.h"
@@ -35,6 +36,9 @@ static frontend_ctx_driver_t *frontend_ctx_drivers[] = {
 #endif
 #if defined(GEKKO)
    &frontend_ctx_gx,
+#endif
+#if defined(WIIU)
+   &frontend_ctx_wiiu,
 #endif
 #if defined(__QNX__)
    &frontend_ctx_qnx,
@@ -82,7 +86,7 @@ frontend_ctx_driver_t *frontend_ctx_find_driver(const char *ident)
 
    for (i = 0; frontend_ctx_drivers[i]; i++)
    {
-      if (!strcmp(frontend_ctx_drivers[i]->ident, ident))
+      if (string_is_equal(frontend_ctx_drivers[i]->ident, ident))
          return frontend_ctx_drivers[i];
    }
 
@@ -148,6 +152,9 @@ bool frontend_driver_get_core_extension(char *s, size_t len)
 #elif defined(__linux__)
    strlcpy(s, "elf", len);
    return true;
+#elif defined(_3DS)
+   strlcpy(s, "core", len);
+   return true;
 #else
    return false;
 #endif
@@ -178,6 +185,9 @@ bool frontend_driver_get_salamander_basename(char *s, size_t len)
    return true;
 #elif defined(HW_RVL)
    strlcpy(s, "boot.dol", len);
+   return true;
+#elif defined(_3DS)
+   strlcpy(s, "retroarch.core", len);
    return true;
 #else
    return false;
@@ -352,6 +362,22 @@ void frontend_driver_set_signal_handler_state(int value)
    if (!frontend || !frontend->set_signal_handler_state)
       return;
    frontend->set_signal_handler_state(value);
+}
+
+void frontend_driver_attach_console(void)
+{
+   frontend_ctx_driver_t *frontend = frontend_get_ptr();
+   if (!frontend || !frontend->attach_console)
+      return;
+   frontend->attach_console();
+}
+
+void frontend_driver_detach_console(void)
+{
+   frontend_ctx_driver_t *frontend = frontend_get_ptr();
+   if (!frontend || !frontend->detach_console)
+      return;
+   frontend->detach_console();
 }
 
 void frontend_driver_destroy_signal_handler_state(void)

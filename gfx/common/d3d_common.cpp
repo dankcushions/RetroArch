@@ -141,8 +141,9 @@ LPDIRECT3DVERTEXBUFFER d3d_vertex_buffer_new(LPDIRECT3DDEVICE dev,
    return buf;
 }
 
-void d3d_vertex_buffer_unlock(LPDIRECT3DVERTEXBUFFER vertbuf)
+void d3d_vertex_buffer_unlock(void *vertbuf_ptr)
 {
+   LPDIRECT3DVERTEXBUFFER vertbuf = (LPDIRECT3DVERTEXBUFFER)vertbuf_ptr;
    /* This is a stub on Xbox 1, see docs. */
 #ifndef _XBOX1
 
@@ -159,9 +160,10 @@ void d3d_vertex_buffer_unlock(LPDIRECT3DVERTEXBUFFER vertbuf)
 #endif
 }
 
-void *d3d_vertex_buffer_lock(LPDIRECT3DVERTEXBUFFER vertbuf)
+void *d3d_vertex_buffer_lock(void *vertbuf_ptr)
 {
    void *buf;
+   LPDIRECT3DVERTEXBUFFER vertbuf = (LPDIRECT3DVERTEXBUFFER)vertbuf_ptr;
 
 #if defined(_XBOX1)
    buf = (void*)D3DVertexBuffer_Lock2(vertbuf, 0);
@@ -197,9 +199,10 @@ void d3d_vertex_buffer_free(void *vertex_data, void *vertex_declaration)
 }
 
 void d3d_set_stream_source(LPDIRECT3DDEVICE dev, unsigned stream_no,
-      LPDIRECT3DVERTEXBUFFER stream_vertbuf, unsigned offset_bytes,
+      void *stream_vertbuf_ptr, unsigned offset_bytes,
       unsigned stride)
 {
+	LPDIRECT3DVERTEXBUFFER stream_vertbuf = (LPDIRECT3DVERTEXBUFFER)stream_vertbuf_ptr;
 #if defined(HAVE_D3D8)
    IDirect3DDevice8_SetStreamSource(dev, stream_no, stream_vertbuf, stride);
 #elif defined(_XBOX360)
@@ -328,7 +331,9 @@ bool d3d_lock_rectangle(LPDIRECT3DTEXTURE tex,
 
 void d3d_unlock_rectangle(LPDIRECT3DTEXTURE tex)
 {
-#ifndef _XBOX
+#ifdef _XBOX
+   D3DTexture_UnlockRect(tex, 0);
+#else
 #if defined(HAVE_D3D9) && !defined(__cplusplus)
    IDirect3DSurface9_UnlockRect(tex);
 #else
@@ -401,36 +406,24 @@ void d3d_texture_blit(unsigned pixel_size,
       LPDIRECT3DTEXTURE tex, D3DLOCKED_RECT *lr, const void *frame,
       unsigned width, unsigned height, unsigned pitch)
 {
-#ifdef _XBOX
-   D3DTexture_LockRect(tex, 0, lr, NULL, D3DLOCK_NOSYSLOCK);
-#if defined(_XBOX360)
-   D3DSURFACE_DESC desc;
-   tex->GetLevelDesc(0, &desc);
-   XGCopySurface(lr->pBits, lr->Pitch, width, height, desc.Format, NULL,
-      frame, pitch, desc.Format, NULL, 0, 0);
-#elif defined(_XBOX1)
-   unsigned y;
-   for (y = 0; y < height; y++)
+   if (d3d_lock_rectangle(tex, 0, lr, NULL, 0, 0))
    {
-      const uint8_t *in = (const uint8_t*)frame + y * pitch;
-      uint8_t *out = (uint8_t*)lr->pBits + y * lr->Pitch;
-      memcpy(out, in, width * pixel_size);
-   }
-#endif
-   D3DTexture_UnlockRect(tex, 0);
+#if defined(_XBOX360) && defined(_XBOX360)
+      D3DSURFACE_DESC desc;
+      tex->GetLevelDesc(0, &desc);
+      XGCopySurface(lr->pBits, lr->Pitch, width, height, desc.Format, NULL,
+            frame, pitch, desc.Format, NULL, 0, 0);
 #else
-   if (SUCCEEDED(tex->LockRect(0, lr, NULL, D3DLOCK_NOSYSLOCK)))
-   {
       unsigned y;
       for (y = 0; y < height; y++)
-      { 
+      {
          const uint8_t *in = (const uint8_t*)frame + y * pitch;
          uint8_t *out = (uint8_t*)lr->pBits + y * lr->Pitch;
          memcpy(out, in, width * pixel_size);
       }
-      tex->UnlockRect(0);
-   }
 #endif
+      d3d_unlock_rectangle(tex);
+   }
 }
 
 void d3d_set_render_state(void *data, D3DRENDERSTATETYPE state, DWORD value)

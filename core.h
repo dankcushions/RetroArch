@@ -51,7 +51,7 @@ typedef struct rarch_system_info
    unsigned performance_level;
 
    const char *input_desc_btn[MAX_USERS][RARCH_FIRST_META_KEY];
-   char valid_extensions[PATH_MAX_LENGTH];
+   char valid_extensions[255];
 
    struct retro_disk_control_callback  disk_control_cb; 
    struct retro_location_callback      location_cb;
@@ -155,6 +155,8 @@ bool core_set_default_callbacks(void *data);
 
 bool core_set_rewind_callbacks(void);
 
+bool core_set_netplay_callbacks(void);
+
 bool core_set_poll_type(unsigned *type);
 
 /* Runs the core for one frame. */
@@ -168,13 +170,17 @@ bool core_unload_game(void);
 
 bool core_reset(void);
 
-bool core_frame(retro_ctx_frame_info_t *info);
+void core_frame(retro_ctx_frame_info_t *info);
 
 bool core_poll(void);
 
 bool core_set_environment(retro_ctx_environ_info_t *info);
 
 bool core_serialize_size(retro_ctx_size_info_t *info);
+
+uint64_t core_serialization_quirks(void);
+
+void core_set_serialization_quirks(uint64_t quirks);
 
 bool core_serialize(retro_ctx_serialize_info_t *info);
 

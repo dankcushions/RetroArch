@@ -375,6 +375,9 @@ static void udev_input_poll(void *data)
    struct epoll_event events[32];
    udev_input_t *udev = (udev_input_t*)data;
 
+   if (!udev)
+      return;
+
    udev->mouse_x   = udev->mouse_y   = 0;
    udev->mouse_wu  = udev->mouse_wd  = 0;
    udev->mouse_whu = udev->mouse_whd = 0;
@@ -457,15 +460,16 @@ static int16_t udev_lightgun_state(udev_input_t *udev, unsigned id)
 
 static int16_t udev_analog_pressed(const struct retro_keybind *binds, unsigned idx, unsigned id)
 {
-   unsigned id_minus = 0;
-   unsigned id_plus  = 0;
-   int16_t pressed_minus = 0, pressed_plus = 0;
+   unsigned id_minus     = 0;
+   unsigned id_plus      = 0;
+   int16_t pressed_minus = 0;
+   int16_t pressed_plus  = 0;
 
    input_conv_analog_id_to_bind_id(idx, id, &id_minus, &id_plus);
 
-   if (udev_input_is_pressed(binds, id_minus))
+   if (binds && binds[id_minus].valid && udev_input_is_pressed(binds, id_minus))
       pressed_minus = -0x7fff;
-   if (udev_input_is_pressed(binds, id_plus))
+   if (binds && binds[id_plus].valid && udev_input_is_pressed(binds, id_plus))
       pressed_plus = 0x7fff;
 
    return pressed_plus + pressed_minus;
@@ -474,13 +478,9 @@ static int16_t udev_analog_pressed(const struct retro_keybind *binds, unsigned i
 static int16_t udev_pointer_state(udev_input_t *udev,
       unsigned idx, unsigned id, bool screen)
 {
-   bool valid, inside;
+   bool inside   = false;
    int16_t res_x = 0, res_y = 0, res_screen_x = 0, res_screen_y = 0;
-
-   if (idx != 0)
-      return 0;
-
-   valid = input_translate_coord_viewport(udev->mouse_x, udev->mouse_y,
+   bool valid    = input_translate_coord_viewport(udev->mouse_x, udev->mouse_y,
          &res_x, &res_y, &res_screen_x, &res_screen_y);
 
    if (!valid)
@@ -519,12 +519,13 @@ static int16_t udev_input_state(void *data, const struct retro_keybind **binds,
    switch (device)
    {
       case RETRO_DEVICE_JOYPAD:
-         return udev_input_is_pressed(binds[port], id) ||
-            input_joypad_pressed(udev->joypad, port, binds[port], id);
-
+         if (binds[port] && binds[port][id].valid)
+            return udev_input_is_pressed(binds[port], id) ||
+               input_joypad_pressed(udev->joypad, port, binds[port], id);
+         break;
       case RETRO_DEVICE_ANALOG:
          ret = udev_analog_pressed(binds[port], idx, id);
-         if (!ret)
+         if (!ret && binds[port])
             ret = input_joypad_analog(udev->joypad, port, idx, id, binds[port]);
          return ret;
 
@@ -535,6 +536,8 @@ static int16_t udev_input_state(void *data, const struct retro_keybind **binds,
 
       case RETRO_DEVICE_POINTER:
       case RARCH_DEVICE_POINTER_SCREEN:
+         if (idx != 0)
+            return 0;
          return udev_pointer_state(udev, idx, id,
                device == RARCH_DEVICE_POINTER_SCREEN);
 
@@ -543,30 +546,6 @@ static int16_t udev_input_state(void *data, const struct retro_keybind **binds,
    }
 
    return 0;
-}
-
-static bool udev_input_key_pressed(void *data, int key)
-{
-   udev_input_t *udev    = (udev_input_t*)data;
-   settings_t *settings  = config_get_ptr();
-   int port              = 0;
-
-   if (udev_input_is_pressed(settings->input.binds[0], key))
-      return true;
-
-   if (settings->input.all_users_control_menu)
-   {
-      for (port = 0; port < MAX_USERS; port++)
-         if (input_joypad_pressed(udev->joypad,
-               port, settings->input.binds[0], key))
-            return true;
-   }
-   else
-      if (input_joypad_pressed(udev->joypad,
-            0, settings->input.binds[0], key))
-         return true;
-
-   return false;
 }
 
 static bool udev_input_meta_key_pressed(void *data, int key)
@@ -647,7 +626,7 @@ static bool open_devices(udev_input_t *udev, const char *type, device_handle_cb 
 static void *udev_input_init(void)
 {
    settings_t *settings = config_get_ptr();
-   udev_input_t *udev = (udev_input_t*)calloc(1, sizeof(*udev));
+   udev_input_t *udev   = (udev_input_t*)calloc(1, sizeof(*udev));
 
    if (!udev)
       return NULL;
@@ -768,7 +747,6 @@ input_driver_t input_udev = {
    udev_input_init,
    udev_input_poll,
    udev_input_state,
-   udev_input_key_pressed,
    udev_input_meta_key_pressed,
    udev_input_free,
    NULL,

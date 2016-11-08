@@ -55,6 +55,7 @@ enum
    ACTION_OK_DL_REWIND_SETTINGS_LIST,
    ACTION_OK_DL_CORE_SETTINGS_LIST,
    ACTION_OK_DL_INPUT_HOTKEY_BINDS_LIST,
+   ACTION_OK_DL_RECORDING_SETTINGS_LIST,
    ACTION_OK_DL_PLAYLIST_SETTINGS_LIST,
    ACTION_OK_DL_ACCOUNTS_LIST,
    ACTION_OK_DL_ACCOUNTS_CHEEVOS_LIST,
@@ -89,6 +90,7 @@ enum
    ACTION_OK_DL_MENU_FILE_BROWSER_SETTINGS_LIST,
    ACTION_OK_DL_RETRO_ACHIEVEMENTS_SETTINGS_LIST,
    ACTION_OK_DL_UPDATER_SETTINGS_LIST,
+   ACTION_OK_DL_WIFI_SETTINGS_LIST,
    ACTION_OK_DL_NETWORK_SETTINGS_LIST,
    ACTION_OK_DL_LAKKA_SERVICES_LIST,
    ACTION_OK_DL_USER_SETTINGS_LIST,
@@ -156,6 +158,9 @@ int menu_cbs_init_bind_get_string_representation(menu_file_list_cbs_t *cbs,
       const char *path, const char *label, unsigned type, size_t idx);
 
 int menu_cbs_init_bind_label(menu_file_list_cbs_t *cbs,
+      const char *path, const char *label, unsigned type, size_t idx);
+
+int menu_cbs_init_bind_sublabel(menu_file_list_cbs_t *cbs,
       const char *path, const char *label, unsigned type, size_t idx);
 
 int menu_cbs_init_bind_up(menu_file_list_cbs_t *cbs,

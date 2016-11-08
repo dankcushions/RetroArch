@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -51,12 +52,9 @@
 #include "menu/widgets/menu_dialog.h"
 #endif
 
-#ifdef HAVE_NETPLAY
-#include "network/netplay/netplay.h"
-#endif
-
 #ifdef HAVE_NETWORKING
 #include <net/net_compat.h>
+#include "network/netplay/netplay.h"
 #endif
 
 #include "command.h"
@@ -73,7 +71,9 @@
 #include "performance_counters.h"
 #include "dynamic.h"
 #include "content.h"
+#include "dirs.h"
 #include "movie.h"
+#include "paths.h"
 #include "msg_hash.h"
 #include "retroarch.h"
 #include "managers/cheat_manager.h"
@@ -100,7 +100,7 @@ struct command
    size_t stdin_buf_ptr;
 #endif
 
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
    int net_fd;
 #endif
 
@@ -114,17 +114,17 @@ enum cmd_source_t
    CMD_NETWORK
 };
 
-#if defined(HAVE_STDIN_CMD) || defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_STDIN_CMD) || defined(HAVE_NETWORK_CMD) && defined(HAVE_NETWORKING)
 static enum cmd_source_t lastcmd_source;
 #endif
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
 static int lastcmd_net_fd;
 static struct sockaddr_storage lastcmd_net_source;
 static socklen_t lastcmd_net_source_len;
 #endif
 
 #ifdef HAVE_CHEEVOS
-#if defined(HAVE_STDIN_CMD) || defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_STDIN_CMD) || defined(HAVE_NETWORK_CMD) && defined(HAVE_NETWORKING)
 static bool command_reply(const char * data, size_t len)
 {
 #ifdef HAVE_STDIN_CMD
@@ -134,7 +134,7 @@ static bool command_reply(const char * data, size_t len)
       return true;
    }
 #endif
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
    if (lastcmd_source == CMD_NETWORK)
    {
       sendto(lastcmd_net_fd, data, len, 0,
@@ -382,14 +382,14 @@ static void command_parse_msg(command_t *handle, char *buf, enum cmd_source_t so
    lastcmd_source = CMD_NONE;
 }
 
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
 static bool command_network_init(command_t *handle, uint16_t port)
 {
    int fd;
    struct addrinfo *res  = NULL;
 
    RARCH_LOG("%s %hu.\n",
-         msg_hash_to_str(MSG_VALUE_BRINGING_UP_COMMAND_INTERFACE_ON_PORT),
+         msg_hash_to_str(MSG_BRINGING_UP_COMMAND_INTERFACE_ON_PORT),
          (unsigned short)port);
 
    fd = socket_init((void**)&res, port, NULL, SOCKET_TYPE_DATAGRAM);
@@ -404,7 +404,8 @@ static bool command_network_init(command_t *handle, uint16_t port)
 
    if (!socket_bind(handle->net_fd, (void*)res))
    {
-      RARCH_ERR("Failed to bind socket.\n");
+      RARCH_ERR("%s.\n",
+            msg_hash_to_str(MSG_FAILED_TO_BIND_SOCKET));
       goto error;
    }
 
@@ -558,6 +559,8 @@ static void command_network_poll(command_t *handle)
       ssize_t ret;
       char buf[1024];
 
+      buf[0] = '\0';
+
       lastcmd_net_fd = handle->net_fd;
       lastcmd_net_source_len = sizeof(lastcmd_net_source);
       ret = recvfrom(handle->net_fd, buf,
@@ -577,7 +580,7 @@ static void command_network_poll(command_t *handle)
 static bool command_stdin_init(command_t *handle)
 {
 #ifndef _WIN32
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
    if (!socket_nonblock(STDIN_FILENO))
       return false;
 #endif
@@ -608,7 +611,7 @@ bool command_network_new(
    if (!handle)
       return false;
 
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
    handle->net_fd = -1;
    if (network_enable && !command_network_init(handle, port))
       goto error;
@@ -622,7 +625,7 @@ bool command_network_new(
 
    return true;
 
-#if (defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)) || defined(HAVE_STDIN_CMD)
+#if (defined(HAVE_NETWORK_CMD) && defined(HAVE_NETWORKING)) || defined(HAVE_STDIN_CMD)
 error:
    command_free(handle);
    return false;
@@ -650,8 +653,9 @@ static size_t read_stdin(char *buf, size_t size)
    if (!PeekNamedPipe(hnd, NULL, 0, NULL, &avail, NULL))
    {
       INPUT_RECORD recs[256];
-      bool has_key = false;
-      DWORD mode = 0, has_read = 0;
+      bool has_key   = false;
+      DWORD mode     = 0;
+      DWORD has_read = 0;
 
       if (!GetConsoleMode(hnd, &mode))
          return 0;
@@ -720,6 +724,7 @@ static size_t read_stdin(char *buf, size_t size)
 static size_t read_stdin(char *buf, size_t size)
 {
    size_t has_read = 0;
+
    while (size)
    {
       ssize_t ret = read(STDIN_FILENO, buf, size);
@@ -738,9 +743,9 @@ static size_t read_stdin(char *buf, size_t size)
 
 static void command_stdin_poll(command_t *handle)
 {
-   char *last_newline;
    ssize_t ret;
    ptrdiff_t msg_len;
+   char *last_newline = NULL;
 
    if (!handle->stdin_enable)
       return;
@@ -790,7 +795,7 @@ bool command_poll(command_t *handle)
 {
    memset(handle->state, 0, sizeof(handle->state));
 
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
    command_network_poll(handle);
 #endif
 
@@ -822,7 +827,7 @@ bool command_set(command_handle_t *handle)
 
 bool command_free(command_t *handle)
 {
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
    if (handle && handle->net_fd >= 0)
       socket_close(handle->net_fd);
 #endif
@@ -843,10 +848,12 @@ bool command_free(command_t *handle)
  **/
 static void command_event_disk_control_set_eject(bool new_state, bool print_log)
 {
-   char msg[128]                                     = {0};
+   char msg[128];
    bool error                                        = false;
    rarch_system_info_t *info                         = NULL;
    const struct retro_disk_control_callback *control = NULL;
+
+   msg[0] = '\0';
 
    runloop_ctl(RUNLOOP_CTL_SYSTEM_INFO_GET, &info);
 
@@ -893,10 +900,12 @@ static void command_event_disk_control_set_eject(bool new_state, bool print_log)
 static void command_event_disk_control_set_index(unsigned idx)
 {
    unsigned num_disks;
+   char msg[128];
    bool error                                        = false;
-   char msg[128]                                     = {0};
    rarch_system_info_t                      *info    = NULL;
    const struct retro_disk_control_callback *control = NULL;
+
+   msg[0] = '\0';
 
    runloop_ctl(RUNLOOP_CTL_SYSTEM_INFO_GET, &info);
 
@@ -911,7 +920,8 @@ static void command_event_disk_control_set_index(unsigned idx)
    if (control->set_image_index(idx))
    {
       if (idx < num_disks)
-         snprintf(msg, sizeof(msg), "Setting disk %u of %u in tray.",
+         snprintf(msg, sizeof(msg), "%s: %u/%u.",
+               msg_hash_to_str(MSG_SETTING_DISK_IN_TRAY),
                idx + 1, num_disks);
       else
          strlcpy(msg,
@@ -921,7 +931,8 @@ static void command_event_disk_control_set_index(unsigned idx)
    else
    {
       if (idx < num_disks)
-         snprintf(msg, sizeof(msg), "Failed to set disk %u of %u.",
+         snprintf(msg, sizeof(msg), "%s %u/%u.",
+               msg_hash_to_str(MSG_FAILED_TO_SET_DISK),
                idx + 1, num_disks);
       else
          strlcpy(msg,
@@ -949,11 +960,12 @@ static void command_event_disk_control_set_index(unsigned idx)
 static bool command_event_disk_control_append_image(const char *path)
 {
    unsigned new_idx;
-   char msg[128]                                      = {0};
+   char msg[128];
    struct retro_game_info info                        = {0};
-   global_t                                  *global  = global_get_ptr();
    const struct retro_disk_control_callback *control  = NULL;
    rarch_system_info_t                       *sysinfo = NULL;
+
+   msg[0] = '\0';
 
    runloop_ctl(RUNLOOP_CTL_SYSTEM_INFO_GET, &sysinfo);
 
@@ -983,14 +995,14 @@ static bool command_event_disk_control_append_image(const char *path)
    command_event(CMD_EVENT_AUTOSAVE_DEINIT, NULL);
 
    /* TODO: Need to figure out what to do with subsystems case. */
-   if (string_is_empty(global->subsystem))
+   if (path_is_empty(RARCH_PATH_SUBSYSTEM))
    {
       /* Update paths for our new image.
        * If we actually use append_image, we assume that we
        * started out in a single disk case, and that this way
        * of doing it makes the most sense. */
-      retroarch_set_pathnames(path);
-      retroarch_fill_pathnames();
+      path_set(RARCH_PATH_NAMES, path);
+      path_fill_names();
    }
 
    command_event(CMD_EVENT_AUTOSAVE_INIT, NULL);
@@ -1082,7 +1094,9 @@ static void command_event_set_volume(float gain)
    settings->audio.volume  = MAX(settings->audio.volume, -80.0f);
    settings->audio.volume  = MIN(settings->audio.volume, 12.0f);
 
-   snprintf(msg, sizeof(msg), "Volume: %.1f dB", settings->audio.volume);
+   snprintf(msg, sizeof(msg), "%s: %.1f dB",
+         msg_hash_to_str(MSG_AUDIO_VOLUME),
+         settings->audio.volume);
    runloop_msg_queue_push(msg, 1, 180, true);
    RARCH_LOG("%s\n", msg);
 
@@ -1152,8 +1166,9 @@ static void command_event_init_controllers(void)
             /* Some cores do not properly range check port argument.
              * This is broken behavior of course, but avoid breaking
              * cores needlessly. */
-            RARCH_LOG("Connecting %s (ID: %u) to port %u.\n", ident,
-                  device, i + 1);
+            RARCH_LOG("%s %u: %s (ID: %u).\n",
+                    msg_hash_to_str(MSG_CONNECTING_TO_PORT),
+                    device, ident, i+1);
             set_controller = true;
             break;
       }
@@ -1190,7 +1205,7 @@ static void command_event_deinit_core(bool reinit)
 static void command_event_init_cheats(void)
 {
    bool allow_cheats = true;
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
    allow_cheats &= !netplay_driver_ctl(
          RARCH_NETPLAY_CTL_IS_DATA_INITED, NULL);
 #endif
@@ -1202,22 +1217,6 @@ static void command_event_init_cheats(void)
    /* TODO/FIXME - add some stuff here. */
 }
 
-static bool event_load_save_files(void)
-{
-   unsigned i;
-   global_t *global = global_get_ptr();
-
-   if (!global)
-      return false;
-   if (!global->savefiles || global->sram.load_disable)
-      return false;
-
-   for (i = 0; i < global->savefiles->size; i++)
-      content_load_ram_file(i);
-
-   return true;
-}
-
 static void command_event_load_auto_state(void)
 {
    bool ret;
@@ -1226,8 +1225,9 @@ static void command_event_load_auto_state(void)
    settings_t *settings = config_get_ptr();
    global_t   *global   = global_get_ptr();
 
-#ifdef HAVE_NETPLAY
-   if (global->netplay.enable && !global->netplay.is_spectate)
+#ifdef HAVE_NETWORKING
+   if (     netplay_driver_ctl(RARCH_NETPLAY_CTL_IS_ENABLED, NULL)
+         && !settings->netplay.is_spectate)
       return;
 #endif
 
@@ -1246,13 +1246,14 @@ static void command_event_load_auto_state(void)
    if (!path_file_exists(savestate_name_auto))
       return;
 
-   ret = content_load_state(savestate_name_auto, false);
+   ret = content_load_state(savestate_name_auto, false, true);
 
-   RARCH_LOG("Found auto savestate in: %s\n", savestate_name_auto);
+   RARCH_LOG("%s: %s\n", msg_hash_to_str(MSG_FOUND_AUTO_SAVESTATE_IN),
+         savestate_name_auto);
 
-   snprintf(msg, sizeof(msg), "Auto-loading savestate from \"%s\" %s.",
+   snprintf(msg, sizeof(msg), "%s \"%s\" %s.",
+         msg_hash_to_str(MSG_AUTOLOADING_SAVESTATE_FROM),
          savestate_name_auto, ret ? "succeeded" : "failed");
-   runloop_msg_queue_push(msg, 1, 180, false);
    RARCH_LOG("%s\n", msg);
 }
 
@@ -1309,16 +1310,12 @@ static void command_event_set_savestate_auto_index(void)
 
    settings->state_slot = max_idx;
    RARCH_LOG("%s: #%d\n",
-         msg_hash_to_str(MSG_VALUE_FOUND_LAST_STATE_SLOT),
+         msg_hash_to_str(MSG_FOUND_LAST_STATE_SLOT),
          settings->state_slot);
 }
 
 static bool event_init_content(void)
 {
-#ifdef HAVE_NETPLAY
-   global_t   *global               = global_get_ptr();
-#endif
-
    rarch_ctl(RARCH_CTL_SET_SRAM_ENABLE, NULL);
 
    /* No content to be loaded for dummy core,
@@ -1327,16 +1324,16 @@ static bool event_init_content(void)
       return true;
 
    if (!content_does_not_need_content())
-      retroarch_fill_pathnames();
+      path_fill_names();
 
    if (!content_init())
       return false;
 
    if (content_does_not_need_content())
    {
-#ifdef HAVE_NETPLAY
-      if (global->netplay.enable)
-         RARCH_ERR("sorry, unimplemented: cores that don't demand content cannot participate in netplay\n");
+#ifdef HAVE_NETWORKING
+      if (netplay_driver_ctl(RARCH_NETPLAY_CTL_IS_ENABLED, NULL))
+         RARCH_ERR("%s\n", msg_hash_to_str(MSG_SORRY_UNIMPLEMENTED_CORES_DONT_DEMAND_CONTENT_NETPLAY));
 #endif
       return true;
    }
@@ -1405,28 +1402,31 @@ static bool command_event_init_core(enum rarch_core_type *data)
 
 static void command_event_disable_overrides(void)
 {
-   /* auto overrides: reload the original config */
-   if (runloop_ctl(RUNLOOP_CTL_IS_OVERRIDES_ACTIVE, NULL))
-   {
-      config_unload_override();
-      runloop_ctl(RUNLOOP_CTL_UNSET_OVERRIDES_ACTIVE, NULL);
-   }
+   if (!runloop_ctl(RUNLOOP_CTL_IS_OVERRIDES_ACTIVE, NULL))
+      return;
+
+   /* reload the original config */
+
+   config_unload_override();
+   runloop_ctl(RUNLOOP_CTL_UNSET_OVERRIDES_ACTIVE, NULL);
 }
 
 static void command_event_restore_default_shader_preset(void)
 {
-   /* auto shader preset: reload the original shader */
-
-   char *preset = NULL;
-   settings_t *settings = config_get_ptr();
-   if (runloop_ctl(RUNLOOP_CTL_GET_DEFAULT_SHADER_PRESET, &preset) &&
-         !string_is_empty(preset))
+   if (!path_is_empty(RARCH_PATH_DEFAULT_SHADER_PRESET))
    {
-      RARCH_LOG("Shaders: restoring default shader preset to %s\n",
-            preset);
-      strlcpy(settings->path.shader, preset, sizeof(settings->path.shader));
+      /* auto shader preset: reload the original shader */
+      settings_t *settings = config_get_ptr();
+
+      RARCH_LOG("%s %s\n",
+            msg_hash_to_str(MSG_RESTORING_DEFAULT_SHADER_PRESET_TO),
+            path_get(RARCH_PATH_DEFAULT_SHADER_PRESET));
+      strlcpy(settings->path.shader,
+            path_get(RARCH_PATH_DEFAULT_SHADER_PRESET),
+            sizeof(settings->path.shader));
    }
-   runloop_ctl(RUNLOOP_CTL_CLEAR_DEFAULT_SHADER_PRESET,  NULL);
+
+   path_clear(RARCH_PATH_DEFAULT_SHADER_PRESET);
 }
 
 static bool command_event_save_auto_state(void)
@@ -1454,11 +1454,33 @@ static bool command_event_save_auto_state(void)
          file_path_str(FILE_PATH_AUTO_EXTENSION),
          sizeof(savestate_name_auto));
 
-   ret = content_save_state((const char*)savestate_name_auto, true);
-   RARCH_LOG("Auto save state to \"%s\" %s.\n", savestate_name_auto, ret ?
+   ret = content_save_state((const char*)savestate_name_auto, true, true);
+   RARCH_LOG("%s \"%s\" %s.\n",
+         msg_hash_to_str(MSG_AUTO_SAVE_STATE_TO),
+         savestate_name_auto, ret ?
          "succeeded" : "failed");
 
    return true;
+}
+
+static bool command_event_save_config(const char *config_path,
+      char *s, size_t len)
+{
+   if (config_save_file(config_path))
+   {
+      snprintf(s, len, "%s \"%s\".",
+            msg_hash_to_str(MSG_SAVED_NEW_CONFIG_TO),
+            path_get(RARCH_PATH_CONFIG));
+      RARCH_LOG("%s\n", s);
+      return true;
+   }
+
+   snprintf(s, len, "%s \"%s\".",
+         msg_hash_to_str(MSG_FAILED_SAVING_CONFIG_TO),
+         path_get(RARCH_PATH_CONFIG));
+   RARCH_ERR("%s\n", s);
+
+   return false;
 }
 
 /**
@@ -1479,14 +1501,12 @@ static bool command_event_save_core_config(void)
    bool found_path                   = false;
    bool overrides_active             = false;
    settings_t *settings              = config_get_ptr();
-   global_t   *global                = global_get_ptr();
 
-   *config_dir = '\0';
    if (!string_is_empty(settings->directory.menu_config))
       strlcpy(config_dir, settings->directory.menu_config,
             sizeof(config_dir));
-   else if (!string_is_empty(global->path.config)) /* Fallback */
-      fill_pathname_basedir(config_dir, global->path.config,
+   else if (!path_is_empty(RARCH_PATH_CONFIG)) /* Fallback */
+      fill_pathname_basedir(config_dir, path_get(RARCH_PATH_CONFIG),
             sizeof(config_dir));
    else
    {
@@ -1496,8 +1516,7 @@ static bool command_event_save_core_config(void)
    }
 
    /* Infer file name based on libretro core. */
-   if (!string_is_empty(config_get_active_core_path())
-         && path_file_exists(config_get_active_core_path()))
+   if (!string_is_empty(path_get(RARCH_PATH_CORE)) && path_file_exists(path_get(RARCH_PATH_CORE)))
    {
       unsigned i;
       RARCH_LOG("%s\n", msg_hash_to_str(MSG_USING_CORE_NAME_FOR_NEW_CONFIG));
@@ -1509,7 +1528,7 @@ static bool command_event_save_core_config(void)
 
          fill_pathname_base_noext(
                config_name,
-               config_get_active_core_path(),
+               path_get(RARCH_PATH_CORE),
                sizeof(config_name));
 
          fill_pathname_join(config_path, config_dir, config_name,
@@ -1554,23 +1573,7 @@ static bool command_event_save_core_config(void)
       overrides_active = true;
    }
 
-   if ((ret = config_save_file(config_path)))
-   {
-      strlcpy(global->path.config, config_path,
-            sizeof(global->path.config));
-      snprintf(msg, sizeof(msg), "%s \"%s\".",
-            msg_hash_to_str(MSG_SAVED_NEW_CONFIG_TO),
-            config_path);
-      RARCH_LOG("%s\n", msg);
-   }
-   else
-   {
-      snprintf(msg, sizeof(msg),
-            "%s \"%s\".",
-            msg_hash_to_str(MSG_FAILED_SAVING_CONFIG_TO),
-            config_path);
-      RARCH_ERR("%s\n", msg);
-   }
+   command_event_save_config(config_path, msg, sizeof(msg));
 
    runloop_msg_queue_push(msg, 1, 180, true);
 
@@ -1587,57 +1590,15 @@ static bool command_event_save_core_config(void)
  * Saves current configuration file to disk, and (optionally)
  * autosave state.
  **/
-void command_event_save_current_config(int override_type)
+static void command_event_save_current_config(int override_type)
 {
-   settings_t *settings = config_get_ptr();
-   global_t   *global   = global_get_ptr();
+   char msg[128]           = {0};
 
-   if (!override_type)
+   if (override_type)
    {
-
-      if (settings->config_save_on_exit && !string_is_empty(global->path.config))
+      if (config_save_overrides(override_type))
       {
-         bool ret                = false;
-         char msg[128]           = {0};
-         const char *config_path = config_get_active_path();
-
-         /* Save last core-specific config to the default config location,
-          * needed on consoles for core switching and reusing last good
-          * config for new cores.
-          */
-
-         /* Flush out the core specific config. */
-         if (config_path)
-            ret = config_save_file(config_path);
-
-         if (ret)
-         {
-            snprintf(msg, sizeof(msg), "%s \"%s\".",
-                  msg_hash_to_str(MSG_SAVED_NEW_CONFIG_TO),
-                  global->path.config);
-            RARCH_LOG("%s\n", msg);
-         }
-         else
-         {
-            snprintf(msg, sizeof(msg), "%s \"%s\".",
-                  msg_hash_to_str(MSG_FAILED_SAVING_CONFIG_TO),
-                  global->path.config);
-            RARCH_ERR("%s\n", msg);
-         }
-
-         runloop_msg_queue_push(msg, 1, 180, true);
-      }
-   }
-   else
-   {
-      bool ret                = false;
-      char msg[128]           = {0};
-
-      ret = config_save_overrides(override_type);
-
-      if (ret)
-      {
-         snprintf(msg, sizeof(msg), "Overrides saved successfully");
+         strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_SAVED_SUCCESSFULLY), sizeof(msg));
          RARCH_LOG("[overrides] %s\n", msg);
 
          /* set overrides to active so the original config can be
@@ -1646,42 +1607,15 @@ void command_event_save_current_config(int override_type)
       }
       else
       {
-         snprintf(msg, sizeof(msg), "Error saving overrides");
+         strlcpy(msg, msg_hash_to_str(MSG_OVERRIDES_ERROR_SAVING), sizeof(msg));
          RARCH_ERR("[overrides] %s\n", msg);
       }
+   }
+   else if (!path_is_empty(RARCH_PATH_CONFIG))
+      command_event_save_config(path_get(RARCH_PATH_CONFIG), msg, sizeof(msg));
 
+   if (!string_is_empty(msg))
       runloop_msg_queue_push(msg, 1, 180, true);
-      return;
-   }
-}
-
-/**
- * event_save_state
- * @path            : Path to state.
- * @s               : Message.
- * @len             : Size of @s.
- *
- * Saves a state with path being @path.
- **/
-static void command_event_save_state(const char *path,
-      char *s, size_t len)
-{
-   settings_t *settings = config_get_ptr();
-
-   if (!content_save_state(path, true))
-   {
-      snprintf(s, len, "%s \"%s\".",
-            msg_hash_to_str(MSG_FAILED_TO_SAVE_STATE_TO),
-            path);
-      return;
-   }
-
-   if (settings->state_slot < 0)
-      snprintf(s, len, "%s #-1 (auto).",
-            msg_hash_to_str(MSG_SAVED_STATE_TO_SLOT));
-   else
-      snprintf(s, len, "%s #%d.", msg_hash_to_str(MSG_SAVED_STATE_TO_SLOT),
-            settings->state_slot);
 }
 
 static void command_event_undo_save_state(char *s, size_t len)
@@ -1694,42 +1628,7 @@ static void command_event_undo_save_state(char *s, size_t len)
    }
 
    if (!content_undo_save_state())
-   {
-      snprintf(s, len, "%s \"%s\".",
-            msg_hash_to_str(MSG_FAILED_TO_UNDO_SAVE_STATE),
-            "RAM");
       return;
-   }
-
-   strlcpy(s, msg_hash_to_str(MSG_RESTORED_OLD_SAVE_STATE), len);
-}
-
-/**
- * event_load_state
- * @path            : Path to state.
- * @s               : Message.
- * @len             : Size of @s.
- *
- * Loads a state with path being @path.
- **/
-static void command_event_load_state(const char *path, char *s, size_t len)
-{
-   settings_t *settings = config_get_ptr();
-
-   if (!content_load_state(path, false))
-   {
-      snprintf(s, len, "%s \"%s\".",
-            msg_hash_to_str(MSG_FAILED_TO_LOAD_STATE),
-            path);
-      return;
-   }
-
-   if (settings->state_slot < 0)
-      snprintf(s, len, "%s #-1 (auto).",
-            msg_hash_to_str(MSG_LOADED_STATE_FROM_SLOT));
-   else
-      snprintf(s, len, "%s #%d.", msg_hash_to_str(MSG_LOADED_STATE_FROM_SLOT),
-            settings->state_slot);
 }
 
 static void command_event_undo_load_state(char *s, size_t len)
@@ -1751,6 +1650,10 @@ static void command_event_undo_load_state(char *s, size_t len)
       return;
    }
 
+#ifdef HAVE_NETWORKING
+   netplay_driver_ctl(RARCH_NETPLAY_CTL_LOAD_SAVESTATE, NULL);
+#endif
+
    strlcpy(s,
          msg_hash_to_str(MSG_UNDID_LOAD_STATE), len);
 }
@@ -1762,6 +1665,7 @@ static void command_event_main_state(unsigned cmd)
    char msg[128]              = {0};
    global_t *global           = global_get_ptr();
    settings_t *settings       = config_get_ptr();
+   bool push_msg              = true;
 
    if (settings->state_slot > 0)
       snprintf(path, sizeof(path), "%s%d",
@@ -1779,10 +1683,17 @@ static void command_event_main_state(unsigned cmd)
       switch (cmd)
       {
          case CMD_EVENT_SAVE_STATE:
-            command_event_save_state(path, msg, sizeof(msg));
+            content_save_state(path, true, false);
+            push_msg = false;
             break;
          case CMD_EVENT_LOAD_STATE:
-            command_event_load_state(path, msg, sizeof(msg));
+            if (content_load_state(path, false, false))
+            {
+#ifdef HAVE_NETWORKING
+               netplay_driver_ctl(RARCH_NETPLAY_CTL_LOAD_SAVESTATE, NULL);
+#endif
+            }
+            push_msg = false;
             break;
          case CMD_EVENT_UNDO_LOAD_STATE:
             command_event_undo_load_state(msg, sizeof(msg));
@@ -1796,19 +1707,13 @@ static void command_event_main_state(unsigned cmd)
       strlcpy(msg, msg_hash_to_str(
                MSG_CORE_DOES_NOT_SUPPORT_SAVESTATES), sizeof(msg));
 
-   runloop_msg_queue_push(msg, 2, 180, true);
+   if (push_msg)
+      runloop_msg_queue_push(msg, 2, 180, true);
    RARCH_LOG("%s\n", msg);
 }
 
-void handle_quit_event()
+void handle_quit_event(void)
 {
-   settings_t *settings      = config_get_ptr();
-#ifdef HAVE_MENU
-   if (settings && settings->confirm_on_exit &&
-         menu_dialog_is_active())
-      return;
-#endif
-
    command_event(CMD_EVENT_AUTOSAVE_STATE, NULL);
    command_event(CMD_EVENT_DISABLE_OVERRIDES, NULL);
    command_event(CMD_EVENT_RESTORE_DEFAULT_SHADER_PRESET, NULL);
@@ -1866,9 +1771,12 @@ bool command_event(enum event_command cmd, void *data)
                video_driver_set_video_mode(width, height, true);
 
                if (width == 0 || height == 0)
-                  strlcpy(msg, "Resolution: DEFAULT", sizeof(msg));
+                  snprintf(msg, sizeof(msg), "%s: DEFAULT",
+                        msg_hash_to_str(MENU_ENUM_LABEL_VALUE_SCREEN_RESOLUTION));
                else
-                  snprintf(msg, sizeof(msg),"Resolution: %dx%d",width, height);
+                  snprintf(msg, sizeof(msg),"%s: %dx%d",
+                        msg_hash_to_str(MENU_ENUM_LABEL_VALUE_SCREEN_RESOLUTION),
+                        width, height);
                runloop_msg_queue_push(msg, 1, 100, true);
             }
          }
@@ -1888,14 +1796,14 @@ bool command_event(enum event_command cmd, void *data)
                core_info_ctx_find_t info_find;
 
 #if defined(HAVE_DYNAMIC)
-               if (string_is_empty(config_get_active_core_path()))
+               if (string_is_empty(path_get(RARCH_PATH_CORE)))
                   return false;
 #endif
                libretro_get_system_info(
-                     config_get_active_core_path(),
+                     path_get(RARCH_PATH_CORE),
                      system,
                      ptr);
-               info_find.path = config_get_active_core_path();
+               info_find.path = path_get(RARCH_PATH_CORE);
 
                if (!core_info_load(&info_find))
                {
@@ -2016,18 +1924,7 @@ bool command_event(enum event_command cmd, void *data)
          core_unload();
 #endif
          break;
-      case CMD_EVENT_QUIT_CONFIRM:
-         handle_quit_event();
-         break;
       case CMD_EVENT_QUIT:
-#ifdef HAVE_MENU
-         if (settings && settings->confirm_on_exit &&
-                !menu_dialog_is_active() && !runloop_is_quit_confirm())
-         {
-            menu_dialog_show_message(MENU_DIALOG_QUIT_CONFIRM, MENU_ENUM_LABEL_CONFIRM_ON_EXIT);
-            break;
-         }
-#endif
          handle_quit_event();
          break;
       case CMD_EVENT_CHEEVOS_HARDCORE_MODE_TOGGLE:
@@ -2036,28 +1933,15 @@ bool command_event(enum event_command cmd, void *data)
 #endif
          break;
       case CMD_EVENT_REINIT:
-         {
-            struct retro_hw_render_callback *hwr =
-               video_driver_get_hw_context();
-
-            if (hwr->cache_context)
-               video_driver_set_video_cache_context();
-            else
-               video_driver_unset_video_cache_context();
-
-            video_driver_unset_video_cache_context_ack();
-            command_event(CMD_EVENT_RESET_CONTEXT, NULL);
-            video_driver_unset_video_cache_context();
-
-            /* Poll input to avoid possibly stale data to corrupt things. */
-            input_driver_poll();
+         video_driver_reinit();
+         /* Poll input to avoid possibly stale data to corrupt things. */
+         input_driver_poll();
 
 #ifdef HAVE_MENU
-            menu_display_set_framebuffer_dirty_flag();
-            if (menu_driver_ctl(RARCH_MENU_CTL_IS_ALIVE, NULL))
-               command_event(CMD_EVENT_VIDEO_SET_BLOCKING_STATE, NULL);
+         menu_display_set_framebuffer_dirty_flag();
+         if (menu_driver_ctl(RARCH_MENU_CTL_IS_ALIVE, NULL))
+            command_event(CMD_EVENT_VIDEO_SET_BLOCKING_STATE, NULL);
 #endif
-         }
          break;
       case CMD_EVENT_CHEATS_DEINIT:
          cheat_manager_state_free();
@@ -2070,7 +1954,7 @@ bool command_event(enum event_command cmd, void *data)
          cheat_manager_apply_cheats();
          break;
       case CMD_EVENT_REWIND_DEINIT:
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
          if (netplay_driver_ctl(RARCH_NETPLAY_CTL_IS_DATA_INITED, NULL))
             return false;
 #endif
@@ -2086,7 +1970,7 @@ bool command_event(enum event_command cmd, void *data)
          if (settings->cheevos.hardcore_mode_enable)
             return false;
 #endif
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
          if (!netplay_driver_ctl(RARCH_NETPLAY_CTL_IS_DATA_INITED, NULL))
 #endif
             state_manager_event_init();
@@ -2099,12 +1983,9 @@ bool command_event(enum event_command cmd, void *data)
          break;
       case CMD_EVENT_AUTOSAVE_DEINIT:
 #ifdef HAVE_THREADS
-         {
-            global_t  *global         = global_get_ptr();
-            if (!global->sram.use)
-               return false;
-            autosave_deinit();
-         }
+         if (!rarch_ctl(RARCH_CTL_IS_SRAM_USED, NULL))
+            return false;
+         autosave_deinit();
 #endif
          break;
       case CMD_EVENT_AUTOSAVE_INIT:
@@ -2127,10 +2008,10 @@ bool command_event(enum event_command cmd, void *data)
          if (audio_driver_alive())
             return false;
 
-         if (!settings->audio.mute_enable && !audio_driver_start())
+         if (settings && !settings->audio.mute_enable && !audio_driver_start())
          {
             RARCH_ERR("%s\n",
-                  msg_hash_to_str(MSG_VALUE_FAILED_TO_START_AUDIO_DRIVER));
+                  msg_hash_to_str(MSG_FAILED_TO_START_AUDIO_DRIVER));
             audio_driver_unset_active();
          }
          break;
@@ -2341,14 +2222,16 @@ bool command_event(enum event_command cmd, void *data)
          break;
       case CMD_EVENT_SHUTDOWN:
 #if defined(__linux__) && !defined(ANDROID)
-         runloop_msg_queue_push("Shutting down...", 1, 180, true);
+         runloop_msg_queue_push(msg_hash_to_str(MSG_VALUE_SHUTTING_DOWN), 1, 180, true);
+	 command_event(CMD_EVENT_MENU_SAVE_CURRENT_CONFIG, NULL);
          command_event(CMD_EVENT_QUIT, NULL);
          system("shutdown -P now");
 #endif
          break;
       case CMD_EVENT_REBOOT:
 #if defined(__linux__) && !defined(ANDROID)
-         runloop_msg_queue_push("Rebooting...", 1, 180, true);
+         runloop_msg_queue_push(msg_hash_to_str(MSG_VALUE_REBOOTING), 1, 180, true);
+	 command_event(CMD_EVENT_MENU_SAVE_CURRENT_CONFIG, NULL);
          command_event(CMD_EVENT_QUIT, NULL);
          system("shutdown -r now");
 #endif
@@ -2361,6 +2244,9 @@ bool command_event(enum event_command cmd, void *data)
       case CMD_EVENT_RESTART_RETROARCH:
          if (!frontend_driver_set_fork(FRONTEND_FORK_RESTART))
             return false;
+#ifndef HAVE_DYNAMIC
+         command_event(CMD_EVENT_QUIT, NULL);
+#endif
          break;
       case CMD_EVENT_MENU_SAVE_CURRENT_CONFIG:
          command_event_save_current_config(OVERRIDE_NONE);
@@ -2383,11 +2269,19 @@ bool command_event(enum event_command cmd, void *data)
       case CMD_EVENT_PAUSE_CHECKS:
          if (runloop_ctl(RUNLOOP_CTL_IS_PAUSED, NULL))
          {
+            bool is_paused = false;
+
             RARCH_LOG("%s\n", msg_hash_to_str(MSG_PAUSED));
             command_event(CMD_EVENT_AUDIO_STOP, NULL);
 
-            if (settings->video.black_frame_insertion)
-               video_driver_cached_frame_render();
+            is_paused  = runloop_ctl(RUNLOOP_CTL_IS_PAUSED, NULL);
+            runloop_msg_queue_push(msg_hash_to_str(MSG_PAUSED), 1, is_paused ? 1: 30, true);
+
+            if (settings->video.black_frame_insertion || is_paused)
+            {
+               if (!runloop_ctl(RUNLOOP_CTL_IS_IDLE, NULL))
+                  video_driver_cached_frame();
+            }
          }
          else
          {
@@ -2430,52 +2324,13 @@ bool command_event(enum event_command cmd, void *data)
 #endif
          break;
       case CMD_EVENT_SHADER_DIR_DEINIT:
-         runloop_ctl(RUNLOOP_CTL_SHADER_DIR_DEINIT, NULL);
+         dir_free_shader();
          break;
       case CMD_EVENT_SHADER_DIR_INIT:
          command_event(CMD_EVENT_SHADER_DIR_DEINIT, NULL);
 
-         if (!runloop_ctl(RUNLOOP_CTL_SHADER_DIR_INIT, NULL))
+         if (!dir_init_shader())
             return false;
-         break;
-      case CMD_EVENT_SAVEFILES:
-         {
-            global_t  *global         = global_get_ptr();
-            if (!global->savefiles || !global->sram.use)
-               return false;
-
-            for (i = 0; i < global->savefiles->size; i++)
-               content_save_ram_file(i);
-         }
-         return true;
-      case CMD_EVENT_SAVEFILES_DEINIT:
-         {
-            global_t  *global         = global_get_ptr();
-            if (!global)
-               break;
-
-            if (global->savefiles)
-               string_list_free(global->savefiles);
-            global->savefiles = NULL;
-         }
-         break;
-      case CMD_EVENT_SAVEFILES_INIT:
-         {
-            global_t  *global         = global_get_ptr();
-            global->sram.use = global->sram.use && !global->sram.save_disable;
-#ifdef HAVE_NETPLAY
-            global->sram.use = global->sram.use &&
-               (!netplay_driver_ctl(RARCH_NETPLAY_CTL_IS_DATA_INITED, NULL)
-                || !global->netplay.is_client);
-#endif
-
-            if (!global->sram.use)
-               RARCH_LOG("%s\n",
-                     msg_hash_to_str(MSG_SRAM_WILL_NOT_BE_SAVED));
-
-            if (global->sram.use)
-               command_event(CMD_EVENT_AUTOSAVE_INIT, NULL);
-         }
          break;
       case CMD_EVENT_BSV_MOVIE_DEINIT:
          bsv_movie_ctl(BSV_MOVIE_CTL_DEINIT, NULL);
@@ -2485,7 +2340,7 @@ bool command_event(enum event_command cmd, void *data)
          bsv_movie_ctl(BSV_MOVIE_CTL_INIT, NULL);
          break;
       case CMD_EVENT_NETPLAY_DEINIT:
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
          deinit_netplay();
 #endif
          break;
@@ -2501,13 +2356,15 @@ bool command_event(enum event_command cmd, void *data)
          break;
       case CMD_EVENT_NETPLAY_INIT:
          command_event(CMD_EVENT_NETPLAY_DEINIT, NULL);
-#ifdef HAVE_NETPLAY
-         if (!init_netplay())
+#ifdef HAVE_NETWORKING
+         if (!init_netplay(
+              settings->netplay.is_spectate, settings->netplay.server,
+              settings->netplay.port))
             return false;
 #endif
          break;
       case CMD_EVENT_NETPLAY_FLIP_PLAYERS:
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
          netplay_driver_ctl(RARCH_NETPLAY_CTL_FLIP_PLAYERS, NULL);
 #endif
          break;
@@ -2536,17 +2393,6 @@ bool command_event(enum event_command cmd, void *data)
          break;
       case CMD_EVENT_TEMPORARY_CONTENT_DEINIT:
          content_deinit();
-         break;
-      case CMD_EVENT_SUBSYSTEM_FULLPATHS_DEINIT:
-         {
-            global_t  *global         = global_get_ptr();
-            if (!global)
-               break;
-
-            if (global->subsystem_fullpaths)
-               string_list_free(global->subsystem_fullpaths);
-            global->subsystem_fullpaths = NULL;
-         }
          break;
       case CMD_EVENT_LOG_FILE_DEINIT:
          retro_main_log_file_deinit();

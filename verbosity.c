@@ -39,6 +39,10 @@
 #include "config.h"
 #endif
 
+#ifdef RARCH_INTERNAL
+#include "frontend/frontend_driver.h"
+#endif
+
 #include "file_path_special.h"
 #include "verbosity.h"
 
@@ -50,11 +54,17 @@ static bool main_verbosity = false;
 void verbosity_enable(void)
 {
    main_verbosity = true;
+#ifdef RARCH_INTERNAL
+   frontend_driver_attach_console();
+#endif
 }
 
 void verbosity_disable(void)
 {
    main_verbosity = false;
+#ifdef RARCH_INTERNAL
+   frontend_driver_detach_console();
+#endif
 }
 
 bool verbosity_is_enabled(void)
@@ -98,6 +108,7 @@ static aslclient asl_client;
 #endif
 #else
    FILE *fp = NULL;
+   (void)fp;
 #endif
 
    if (!verbosity_is_enabled())
@@ -120,7 +131,10 @@ static aslclient asl_client;
 #endif
 #elif defined(_XBOX1)
    /* FIXME: Using arbitrary string as fmt argument is unsafe. */
-   char msg_new[1024], buffer[1024];
+   char msg_new[1024];
+   char buffer[1024];
+
+   msg_new[0] = buffer[0] = '\0';
    snprintf(msg_new, sizeof(msg_new), "%s: %s %s",
          file_path_str(FILE_PATH_PROGRAM_NAME),
          tag ? tag : "",

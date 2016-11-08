@@ -31,6 +31,7 @@
 #include "../../input/drivers_keyboard/keyboard_event_apple.h"
 #include "../../frontend/frontend.h"
 #include "../../configuration.h"
+#include "../../paths.h"
 #include "../../core.h"
 #include "../../retroarch.h"
 #include "../../runloop.h"
@@ -147,20 +148,27 @@ static void app_terminate(void)
         case NSLeftMouseDown:
         case NSRightMouseDown:
         case NSOtherMouseDown:
+       {
+           NSPoint pos = [[CocoaView get] convertPoint:[event locationInWindow] fromView:nil];
          apple = (cocoa_input_data_t*)input_driver_get_data();
-         if (!apple)
+         if (!apple || pos.y < 0)
             return;
          apple->mouse_buttons |= 1 << event.buttonNumber;
-         apple->touch_count = 1;
+        
+           apple->touch_count = 1;
+       }
          break;
       case NSLeftMouseUp:
       case NSRightMouseUp:
       case NSOtherMouseUp:
+       {
+         NSPoint pos = [[CocoaView get] convertPoint:[event locationInWindow] fromView:nil];
          apple = (cocoa_input_data_t*)input_driver_get_data();
-         if (!apple)
+         if (!apple || pos.y < 0)
             return;
          apple->mouse_buttons &= ~(1 << event.buttonNumber);
          apple->touch_count = 0;
+       }
          break;
    }
 }
@@ -221,9 +229,9 @@ static char** waiting_argv;
 
 - (void) rarch_main
 {
-    int ret = 0;
-    while (ret != -1)
+    do
     {
+       int ret;
        unsigned sleep_ms = 0;
        const ui_application_t *application = ui_companion_driver_get_application_ptr();
        if (application)
@@ -233,7 +241,9 @@ static char** waiting_argv;
           retro_sleep(sleep_ms);
        task_queue_ctl(TASK_QUEUE_CTL_CHECK, NULL);
        while(CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.002, FALSE) == kCFRunLoopRunHandledSource);
-    }
+       if (ret == -1)
+          break;
+    }while(1);
     
     main_exit(NULL);
 }
@@ -289,7 +299,7 @@ static char** waiting_argv;
                NULL, NULL);
       }
       else
-         runloop_ctl(RUNLOOP_CTL_SET_CONTENT_PATH, (void*)__core.UTF8String);
+         path_set(RARCH_PATH_CONTENT, __core.UTF8String);
 
       [sender replyToOpenOrPrint:NSApplicationDelegateReplySuccess];
    }
@@ -328,7 +338,7 @@ static void open_core_handler(ui_browser_window_state_t *state, bool result)
                       && settings->set_supports_no_game_enable)
     {
         content_ctx_info_t content_info = {0};
-        runloop_ctl(RUNLOOP_CTL_CLEAR_CONTENT_PATH, NULL);
+        path_clear(RARCH_PATH_CONTENT);
         task_push_content_load_default(
                 NULL, NULL,
                 &content_info,
@@ -355,7 +365,7 @@ static void open_document_handler(ui_browser_window_state_t *state, bool result)
     if (system)
         core_name = system->library_name;
                 
-    runloop_ctl(RUNLOOP_CTL_SET_CONTENT_PATH, (void*)state->result);
+    path_set(RARCH_PATH_CONTENT, state->result);
                 
     if (core_name)
     {

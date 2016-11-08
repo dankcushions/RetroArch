@@ -27,11 +27,12 @@
 #endif
 
 #include "frontend.h"
+#include "../configuration.h"
 #include "../ui/ui_companion_driver.h"
 #include "../tasks/tasks_internal.h"
 
-#include "../configuration.h"
 #include "../driver.h"
+#include "../paths.h"
 #include "../retroarch.h"
 #include "../runloop.h"
 
@@ -45,7 +46,10 @@
  **/
 void main_exit(void *args)
 {
-   command_event(CMD_EVENT_MENU_SAVE_CURRENT_CONFIG, NULL);
+   settings_t *settings = config_get_ptr();
+
+   if (settings->config_save_on_exit)
+      command_event(CMD_EVENT_MENU_SAVE_CURRENT_CONFIG, NULL);
 
 #ifdef HAVE_MENU
    /* Do not want menu context to live any more. */
@@ -61,8 +65,8 @@ void main_exit(void *args)
 
    frontend_driver_deinit(args);
    frontend_driver_exitspawn(
-         config_get_active_core_path_ptr(),
-         config_get_active_core_path_size());
+         path_get_ptr(RARCH_PATH_CORE),
+         path_get_realsize(RARCH_PATH_CORE));
 
    rarch_ctl(RARCH_CTL_DESTROY, NULL);
 
@@ -89,9 +93,6 @@ void main_exit(void *args)
 int rarch_main(int argc, char *argv[], void *data)
 {
    void *args                      = (void*)data;
-#ifndef HAVE_MAIN
-   int ret                         = 0;
-#endif
 
    rarch_ctl(RARCH_CTL_PREINIT, NULL);
    frontend_driver_init_first(args);
@@ -123,12 +124,14 @@ int rarch_main(int argc, char *argv[], void *data)
    do
    {
       unsigned sleep_ms = 0;
-      ret = runloop_iterate(&sleep_ms);
+      int           ret = runloop_iterate(&sleep_ms);
 
       if (ret == 1 && sleep_ms > 0)
          retro_sleep(sleep_ms);
       task_queue_ctl(TASK_QUEUE_CTL_CHECK, NULL);
-   }while(ret != -1);
+      if (ret == -1)
+         break;
+   }while(1);
 
    main_exit(args);
 #endif

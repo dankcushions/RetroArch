@@ -76,7 +76,7 @@ struct udev_joypad
    uint16_t strength[2];
    uint16_t configured_strength[2];
 
-   char ident[PATH_MAX_LENGTH];
+   char ident[255];
    char *path;
    int32_t vid;
    int32_t pid;
@@ -362,9 +362,11 @@ static void udev_check_device(struct udev_device *dev, const char *path, bool ho
       default:
          if (hotplugged)
          {
-            char msg[PATH_MAX_LENGTH] = {0};
+            char msg[255];
 
-            snprintf(msg, sizeof(msg), "Device #%u (%s) connected.", pad, path);
+            msg[0] = '\0';
+
+            snprintf(msg, sizeof(msg), "Device connected: #%u (%s).", pad, path);
             runloop_msg_queue_push(msg, 0, 60, false);
             RARCH_LOG("[udev]: %s\n", msg);
          }
@@ -531,10 +533,9 @@ static void udev_joypad_poll(void)
 static bool udev_joypad_init(void *data)
 {
    unsigned i;
-   struct udev_list_entry *devs = NULL;
-   struct udev_list_entry *item = NULL;
+   struct udev_list_entry *devs     = NULL;
+   struct udev_list_entry *item     = NULL;
    struct udev_enumerate *enumerate = NULL;
-   settings_t *settings = config_get_ptr();
 
    (void)data;
 

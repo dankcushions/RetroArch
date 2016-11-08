@@ -157,12 +157,13 @@ static void gfx_ctx_drm_check_window(void *data, bool *quit,
 static void drm_flip_handler(int fd, unsigned frame,
       unsigned sec, unsigned usec, void *data)
 {
-   static unsigned first_page_flip;
-   static unsigned last_page_flip;
-
    (void)fd;
    (void)sec;
    (void)usec;
+  
+#if 0
+   static unsigned first_page_flip;
+   static unsigned last_page_flip;
 
    if (!first_page_flip)
       first_page_flip = frame;
@@ -176,6 +177,8 @@ static void drm_flip_handler(int fd, unsigned frame,
    }
 
    last_page_flip = frame;
+#endif
+
    *(bool*)data = false;
 }
 
@@ -365,7 +368,6 @@ static void *gfx_ctx_drm_init(void *video_driver)
    if (!drm)
       return NULL;
 
-   fd   = -1;
    gpu_descriptors = dir_list_new("/dev/dri", NULL, false, true, false, false);
 
 nextgpu:

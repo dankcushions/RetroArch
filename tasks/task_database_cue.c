@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
  *  Copyright (C) 2014-2016 - Jean-André Santoni
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -29,9 +30,7 @@
 #include "../config.h"
 #endif
 
-#ifdef HAVE_LIBRETRODB
 #include "../database_info.h"
-#endif
 
 #include "tasks_internal.h"
 
@@ -151,13 +150,14 @@ static int detect_ps1_game_sub(const char *track_path,
    uint8_t* tmp;
    uint8_t* boot_file;
    int skip, frame_size, is_mode1, cd_sector;
-   uint8_t buffer[2048 * 2] = {0};
+   uint8_t buffer[2048 * 2];
    RFILE                *fp = 
       filestream_open(track_path, RFILE_MODE_READ, -1);
    if (!fp)
       return 0;
 
-   is_mode1 = 0;
+   buffer[0] = '\0';
+   is_mode1  = 0;
    filestream_seek(fp, 0, SEEK_END);
 
    if (!sub_channel_mixed)
@@ -384,7 +384,7 @@ int find_first_data_track(const char *cue_path,
       int32_t *offset, char *track_path, size_t max_len)
 {
    int rv;
-   char tmp_token[MAX_TOKEN_LEN] = {0};
+   char tmp_token[MAX_TOKEN_LEN];
    RFILE *fd                     = 
       filestream_open(cue_path, RFILE_MODE_READ, -1);
 
@@ -397,11 +397,15 @@ int find_first_data_track(const char *cue_path,
 
    RARCH_LOG("Parsing CUE file '%s'...\n", cue_path);
 
+   tmp_token[0] = '\0';
+
    while (get_token(fd, tmp_token, MAX_TOKEN_LEN) > 0)
    {
       if (string_is_equal(tmp_token, "FILE"))
       {
-         char cue_dir[PATH_MAX_LENGTH] = {0};
+         char cue_dir[PATH_MAX_LENGTH];
+
+         cue_dir[0] = '\0';
 
          fill_pathname_basedir(cue_dir, cue_path, sizeof(cue_dir));
 

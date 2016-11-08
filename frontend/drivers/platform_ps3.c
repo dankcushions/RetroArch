@@ -32,6 +32,7 @@
 #endif
 
 #include <compat/strl.h>
+#include <string/stdstring.h>
 #include <file/file_path.h>
 #ifndef IS_SALAMANDER
 #include <lists/file_list.h>
@@ -125,7 +126,7 @@ static void frontend_ps3_get_environment_settings(int *argc, char *argv[],
    /* not launched from external launcher, set default path */
    // second param is multiMAN SELF file
    if(path_file_exists(argv[2]) && *argc > 1
-         && (!strcmp(argv[2], EMULATOR_CONTENT_DIR)))
+         && (string_is_equal(argv[2], EMULATOR_CONTENT_DIR)))
    {
       multiman_detected = true;
       RARCH_LOG("Started from multiMAN, auto-game start enabled.\n");
@@ -391,9 +392,7 @@ static int frontend_ps3_exec_exitspawn(const char *path,
 static void frontend_ps3_exec(const char *path, bool should_load_game)
 {
 #ifndef IS_SALAMANDER
-   char *fullpath        = NULL;
    bool original_verbose = verbosity_is_enabled();
-
    verbosity_enable();
 #endif
 
@@ -402,12 +401,10 @@ static void frontend_ps3_exec(const char *path, bool should_load_game)
    RARCH_LOG("Attempt to load executable: [%s].\n", path);
 
 #ifndef IS_SALAMANDER
-   runloop_ctl(RUNLOOP_CTL_GET_CONTENT_PATH, &fullpath);
-
-   if (should_load_game && !string_is_empty(fullpath))
+   if (should_load_game && !path_is_empty(RARCH_PATH_CONTENT))
    {
       char game_path[256];
-      strlcpy(game_path, fullpath, sizeof(game_path));
+      strlcpy(game_path, path_get(RARCH_PATH_CONTENT), sizeof(game_path));
 
       const char * const spawn_argv[] = {
          game_path,
@@ -571,5 +568,7 @@ frontend_ctx_driver_t frontend_ctx_ps3 = {
    NULL,                         /* get_sighandler_state */
    NULL,                         /* set_sighandler_state */
    NULL,                         /* destroy_sighandler_state */
+   NULL,                         /* attach_console */
+   NULL,                         /* detach_console */
    "ps3",
 };

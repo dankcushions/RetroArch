@@ -39,6 +39,9 @@ static input_device_driver_t *joypad_drivers[] = {
 #ifdef GEKKO
    &gx_joypad,
 #endif
+#ifdef WIIU
+   &wiiu_joypad,
+#endif
 #ifdef _XBOX
    &xdk_joypad,
 #endif
@@ -239,38 +242,24 @@ bool input_joypad_pressed(
       const void *binds_data,
       unsigned key)
 {
-   float scaled_axis;
-   int16_t  axis;
-   uint32_t joyaxis;
-   uint64_t joykey;
-   const struct retro_keybind *auto_binds = NULL;
-   const struct retro_keybind *binds = (const struct retro_keybind*)
-      binds_data;
-   settings_t *settings = config_get_ptr();
-   unsigned joy_idx = settings->input.joypad_map[port];
-
-   if (joy_idx >= MAX_USERS)
-      return false;
-   if (!drv || !binds[key].valid)
-      return false;
-
+   settings_t *settings                   = config_get_ptr();
+   unsigned joy_idx                       = settings->input.joypad_map[port];
+   const struct retro_keybind *binds      = (const struct retro_keybind*)binds_data;
    /* Auto-binds are per joypad, not per user. */
-   auto_binds = settings->input.autoconf_binds[joy_idx];
+   const struct retro_keybind *auto_binds = settings->input.autoconf_binds[joy_idx];
+   uint64_t                        joykey = (binds[key].joykey != NO_BTN)
+      ? binds[key].joykey : auto_binds[key].joykey;
 
-   joykey = binds[key].joykey;
-   if (joykey == NO_BTN)
-      joykey = auto_binds[key].joykey;
+   if (!drv->button(joy_idx, (uint16_t)joykey))
+   {
+      uint32_t joyaxis     = (binds[key].joyaxis != AXIS_NONE) 
+         ? binds[key].joyaxis : auto_binds[key].joyaxis;
+      int16_t  axis        = drv->axis(joy_idx, joyaxis);
+      float    scaled_axis = (float)abs(axis) / 0x8000;
+      return scaled_axis > settings->input.axis_threshold;
+   }
 
-   if (drv->button(joy_idx, (uint16_t)joykey))
-      return true;
-
-   joyaxis = binds[key].joyaxis;
-   if (joyaxis == AXIS_NONE)
-      joyaxis = auto_binds[key].joyaxis;
-
-   axis        = drv->axis(joy_idx, joyaxis);
-   scaled_axis = (float)abs(axis) / 0x8000;
-   return scaled_axis > settings->input.axis_threshold;
+   return true;
 }
 
 /**
@@ -297,26 +286,17 @@ int16_t input_joypad_analog(const input_device_driver_t *drv,
       const void *binds_data)
 {
    uint32_t axis_minus, axis_plus;
-   uint64_t key_minus, key_plus;
    int16_t  pressed_minus, pressed_plus, res;
-   unsigned ident_minus = 0, ident_plus = 0;
-   int16_t digital_left = 0, digital_right = 0;
-   const struct retro_keybind *auto_binds = NULL;
+   unsigned ident_minus                   = 0;
+   unsigned ident_plus                    = 0;
    const struct retro_keybind *bind_minus = NULL;
    const struct retro_keybind *bind_plus  = NULL;
-   const struct retro_keybind *binds = (const struct retro_keybind*)
+   const struct retro_keybind *binds      = (const struct retro_keybind*)
       binds_data;
-   settings_t *settings = config_get_ptr();
-   unsigned joy_idx = settings->input.joypad_map[port];
-
-   if (!drv)
-      return 0;
-
-   if (joy_idx >= MAX_USERS)
-      return 0;
-
+   settings_t *settings                   = config_get_ptr();
+   unsigned joy_idx                       = settings->input.joypad_map[port];
    /* Auto-binds are per joypad, not per user. */
-   auto_binds = settings->input.autoconf_binds[joy_idx];
+   const struct retro_keybind *auto_binds = settings->input.autoconf_binds[joy_idx];
 
    input_conv_analog_id_to_bind_id(idx, ident, &ident_minus, &ident_plus);
 
@@ -336,21 +316,26 @@ int16_t input_joypad_analog(const input_device_driver_t *drv,
    pressed_plus  = abs(drv->axis(joy_idx, axis_plus));
    res           = pressed_plus - pressed_minus;
 
-   if (res != 0)
-      return res;
+   if (res == 0)
+   {
+      int16_t digital_left  = 0;
+      int16_t digital_right = 0;
+      uint64_t key_minus    = bind_minus->joykey;
+      uint64_t key_plus     = bind_plus->joykey;
 
-   key_minus = bind_minus->joykey;
-   key_plus  = bind_plus->joykey;
-   if (key_minus == NO_BTN)
-      key_minus = auto_binds[ident_minus].joykey;
-   if (key_plus == NO_BTN)
-      key_plus = auto_binds[ident_plus].joykey;
+      if (key_minus == NO_BTN)
+         key_minus = auto_binds[ident_minus].joykey;
+      if (key_plus == NO_BTN)
+         key_plus = auto_binds[ident_plus].joykey;
 
-   if (drv->button(joy_idx, (uint16_t)key_minus))
-      digital_left  = -0x7fff;
-   if (drv->button(joy_idx, (uint16_t)key_plus))
-      digital_right = 0x7fff;
-   return digital_right + digital_left;
+      if (drv->button(joy_idx, (uint16_t)key_minus))
+         digital_left  = -0x7fff;
+      if (drv->button(joy_idx, (uint16_t)key_plus))
+         digital_right = 0x7fff;
+      return digital_right + digital_left;
+   }
+
+   return res;
 }
 
 /**

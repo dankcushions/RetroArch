@@ -32,8 +32,11 @@
 #include <time/time.h>
 #elif defined(GEKKO) || defined(__PSL1GHT__) || defined(__QNX__)
 #include <unistd.h>
+#elif defined(WIIU)
+#include <coreinit/thread.h>
+#include "system/wiiu.h"
 #elif defined(PSP)
-#include <pspthreadman.h> 
+#include <pspthreadman.h>
 #elif defined(VITA)
 #include <psp2/kernel/threadmgr.h>
 #elif defined(_3DS)
@@ -58,7 +61,7 @@
 #include <retro_inline.h>
 
 #ifndef PATH_MAX_LENGTH
-#if defined(_XBOX1) || defined(_3DS) || defined(PSP) || defined(GEKKO)
+#if defined(_XBOX1) || defined(_3DS) || defined(PSP) || defined(GEKKO)|| defined(WIIU)
 #define PATH_MAX_LENGTH 512
 #else
 #define PATH_MAX_LENGTH 4096
@@ -100,6 +103,8 @@ static INLINE void retro_sleep(unsigned msec)
    udelay(1000 * msec);
 #elif defined(GEKKO) || defined(__PSL1GHT__) || defined(__QNX__)
    usleep(1000 * msec);
+#elif defined(WIIU)
+   OSSleepTicks(ms_to_ticks(msec));
 #else
    struct timespec tv = {0};
    tv.tv_sec = msec / 1000;
@@ -159,6 +164,18 @@ static INLINE float db_to_gain(float db)
    return powf(10.0f, db / 20.0f);
 }
 
+static INLINE uint32_t read_le(const uint8_t *data, unsigned size)
+{
+   unsigned i;
+   uint32_t val = 0;
+
+   size *= 8;
+   for (i = 0; i < size; i += 8)
+      val |= (uint32_t)*data++ << i;
+
+   return val;
+}
+
 /* Helper macros and struct to keep track of many booleans.
  * To check for multiple bits, use &&, not &.
  * For OR, | can be used. */
@@ -186,7 +203,7 @@ typedef struct
 #define BIT64_GET(a, bit) (!!((a) &   (UINT64_C(1) << ((bit) & 63))))
 #define BIT64_CLEAR_ALL(a)   ((a) = 0)
 
-#define BIT128_SET(a, bit)   ((a).data[(bit) >> 5] |=  (1 << ((bit) & 31))
+#define BIT128_SET(a, bit)   ((a).data[(bit) >> 5] |=  (1 << ((bit) & 31)))
 #define BIT128_CLEAR(a, bit) ((a).data[(bit) >> 5] &= ~(1 << ((bit) & 31)))
 #define BIT128_GET(a, bit)   ((a).data[(bit) >> 5] &   (1 << ((bit) & 31)))
 #define BIT128_CLEAR_ALL(a)  memset(&(a), 0, sizeof(a));

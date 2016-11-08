@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -64,6 +65,12 @@ int menu_hash_get_help_enum(enum msg_hash_enums msg, char *s, size_t len)
       case RETRO_LANGUAGE_JAPANESE:
          ret = menu_hash_get_help_jp_enum(msg, s, len);
          break;
+      case RETRO_LANGUAGE_VIETNAMESE:
+         ret = menu_hash_get_help_vn_enum(msg, s, len);
+         break;
+      case RETRO_LANGUAGE_CHINESE_SIMPLIFIED:
+         ret = menu_hash_get_help_chs_enum(msg, s, len);
+         break;
       default:
          break;
    }
@@ -116,6 +123,12 @@ const char *msg_hash_to_str(enum msg_hash_enums msg)
          break;
       case RETRO_LANGUAGE_JAPANESE:
          ret = msg_hash_to_str_jp(msg);
+         break;
+      case RETRO_LANGUAGE_VIETNAMESE:
+         ret = msg_hash_to_str_vn(msg);
+         break;
+      case RETRO_LANGUAGE_CHINESE_SIMPLIFIED:
+         ret = msg_hash_to_str_chs(msg);
          break;
       default:
          break;
@@ -198,6 +211,8 @@ uint32_t msg_hash_calculate(const char *s)
 
 #define FILE_HASH_APK                                                          0x0b885e61U
 
+#define HASH_EXTENSION_7Z                                                      0x005971d6U
+#define HASH_EXTENSION_7Z_UPP                                                  0x005971b6U
 #define HASH_EXTENSION_ZIP                                                     0x0b88c7d8U
 #define HASH_EXTENSION_ZIP_UPP                                                 0x0b883b78U
 #define HASH_EXTENSION_CUE                                                     0x0b886782U
@@ -211,6 +226,8 @@ enum msg_file_type msg_hash_to_file_type(uint32_t hash)
    switch (hash)
    {
       case MENU_VALUE_COMP:
+      case HASH_EXTENSION_7Z:
+      case HASH_EXTENSION_7Z_UPP:
       case HASH_EXTENSION_ZIP:
       case HASH_EXTENSION_ZIP_UPP:
       case FILE_HASH_APK:

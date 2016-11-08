@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -42,7 +43,8 @@ enum menu_action
    MENU_ACTION_SCROLL_UP,
    MENU_ACTION_TOGGLE,
    MENU_ACTION_POINTER_MOVED,
-   MENU_ACTION_POINTER_PRESSED
+   MENU_ACTION_POINTER_PRESSED,
+   MENU_ACTION_QUIT
 };
 
 enum menu_input_pointer_state
@@ -79,6 +81,26 @@ enum menu_input_ctl_state
    MENU_INPUT_CTL_DEINIT
 };
 
+typedef struct menu_input
+{
+   struct
+   {
+      unsigned ptr;
+   } mouse;
+
+   struct
+   {
+      int16_t x;
+      int16_t y;
+      int16_t dx;
+      int16_t dy;
+      float accel;
+      bool pressed[2];
+      bool back;
+      unsigned ptr;
+   } pointer;
+} menu_input_t;
+
 typedef struct menu_input_ctx_hitbox
 {
    int32_t x1;
@@ -86,15 +108,6 @@ typedef struct menu_input_ctx_hitbox
    int32_t y1;
    int32_t y2;
 } menu_input_ctx_hitbox_t;
-
-/* Send input code to menu for one frame.
- *
- * TODO/FIXME - needs to be overhauled so we can send multiple
- * events per frame if we want to, and we shouldn't send the
- * entire button state either but do a separate event per button
- * state.
- */
-unsigned menu_event(retro_input_t input, retro_input_t trigger_state);
 
 void menu_input_post_iterate(int *ret, unsigned action);
 
@@ -105,6 +118,8 @@ int16_t menu_input_mouse_state(enum menu_input_mouse_state state);
 bool menu_input_mouse_check_vector_inside_hitbox(menu_input_ctx_hitbox_t *hitbox);
 
 bool menu_input_ctl(enum menu_input_ctl_state state, void *data);
+
+menu_input_t *menu_input_get_ptr(void);
 
 RETRO_END_DECLS
 

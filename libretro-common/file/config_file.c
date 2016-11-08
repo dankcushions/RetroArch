@@ -258,7 +258,7 @@ static void add_child_list(config_file_t *parent, config_file_t *child)
 
 static void add_sub_conf(config_file_t *conf, char *line)
 {
-   char real_path[PATH_MAX_LENGTH] = {0};
+   char real_path[PATH_MAX_LENGTH];
    config_file_t         *sub_conf = NULL;
    char                      *path = extract_value(line, false);
 
@@ -266,6 +266,8 @@ static void add_sub_conf(config_file_t *conf, char *line)
       return;
 
    add_include_list(conf, path);
+
+   real_path[0] = '\0';
 
 #ifdef _WIN32
    fill_pathname_resolve_relative(real_path, conf->path,
@@ -397,6 +399,7 @@ static config_file_t *config_file_new_internal(
       free(conf->path);
       goto error;
    }
+   setvbuf(file, NULL, _IOFBF, 0x4000);
 
    while (!feof(file))
    {
@@ -535,7 +538,7 @@ config_file_t *config_file_new_from_string(const char *from_string)
          return NULL;
       }
 
-      if (line)
+      if (line && conf)
       {
          if (parse_line(conf, list, line))
          {
@@ -802,7 +805,9 @@ void config_set_path(config_file_t *conf, const char *entry, const char *val)
 #if defined(RARCH_CONSOLE)
    config_set_string(conf, entry, val);
 #else
-   char buf[PATH_MAX_LENGTH] = {0};
+   char buf[PATH_MAX_LENGTH];
+
+   buf[0] = '\0';
    fill_pathname_abbreviate_special(buf, val, sizeof(buf));
    config_set_string(conf, entry, buf);
 #endif
@@ -810,7 +815,9 @@ void config_set_path(config_file_t *conf, const char *entry, const char *val)
 
 void config_set_double(config_file_t *conf, const char *key, double val)
 {
-   char buf[128] = {0};
+   char buf[128];
+
+   buf[0] = '\0';
 #ifdef __cplusplus
    snprintf(buf, sizeof(buf), "%f", (float)val);
 #elif defined(__STDC_VERSION__) && __STDC_VERSION__>=199901L
@@ -823,28 +830,36 @@ void config_set_double(config_file_t *conf, const char *key, double val)
 
 void config_set_float(config_file_t *conf, const char *key, float val)
 {
-   char buf[128] = {0};
+   char buf[128];
+
+   buf[0] = '\0';
    snprintf(buf, sizeof(buf), "%f", val);
    config_set_string(conf, key, buf);
 }
 
 void config_set_int(config_file_t *conf, const char *key, int val)
 {
-   char buf[128] = {0};
+   char buf[128];
+
+   buf[0] = '\0';
    snprintf(buf, sizeof(buf), "%d", val);
    config_set_string(conf, key, buf);
 }
 
 void config_set_hex(config_file_t *conf, const char *key, unsigned val)
 {
-   char buf[128] = {0};
+   char buf[128];
+
+   buf[0] = '\0';
    snprintf(buf, sizeof(buf), "%x", val);
    config_set_string(conf, key, buf);
 }
 
 void config_set_uint64(config_file_t *conf, const char *key, uint64_t val)
 {
-   char buf[128] = {0};
+   char buf[128];
+
+   buf[0] = '\0';
 #ifdef _WIN32
    snprintf(buf, sizeof(buf), "%I64u", val);
 #else
@@ -855,7 +870,9 @@ void config_set_uint64(config_file_t *conf, const char *key, uint64_t val)
 
 void config_set_char(config_file_t *conf, const char *key, char val)
 {
-   char buf[2] = {0};
+   char buf[2];
+
+   buf[0] = '\0';
    snprintf(buf, sizeof(buf), "%c", val);
    config_set_string(conf, key, buf);
 }
@@ -874,6 +891,7 @@ bool config_file_write(config_file_t *conf, const char *path)
       file = fopen(path, "w");
       if (!file)
          return false;
+      setvbuf(file, NULL, _IOFBF, 0x4000);
    }
    else
       file = stdout;
@@ -948,3 +966,12 @@ bool config_get_entry_list_next(struct config_file_entry *entry)
    return true;
 }
 
+bool config_file_exists(const char *path)
+{
+   config_file_t *config = config_file_new(path);
+   if (!config)
+      return false;
+
+   config_file_free(config);
+   return true;
+}

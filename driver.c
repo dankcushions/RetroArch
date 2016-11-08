@@ -34,6 +34,7 @@
 #include "camera/camera_driver.h"
 #include "record/record_driver.h"
 #include "location/location_driver.h"
+#include "wifi/wifi_driver.h"
 #include "configuration.h"
 #include "core.h"
 #include "driver.h"
@@ -49,6 +50,7 @@
 #define HASH_AUDIO_DRIVER              0x26594002U
 #define HASH_AUDIO_RESAMPLER_DRIVER    0xedcba9ecU
 #define HASH_RECORD_DRIVER             0x144cd2cfU
+#define HASH_WIFI_DRIVER               0x64d7d17fU
 
 /**
  * find_driver_nonempty:
@@ -118,6 +120,11 @@ static const void *find_driver_nonempty(const char *label, int i,
          if (drv)
             strlcpy(s, audio_resampler_driver_find_ident(i), len);
          break;
+      case HASH_WIFI_DRIVER:
+         drv = wifi_driver_find_handle(i);
+         if (drv)
+            strlcpy(s, wifi_driver_find_ident(i), len);
+         break;
    }
 
    return drv;
@@ -136,7 +143,9 @@ static const void *find_driver_nonempty(const char *label, int i,
 static int driver_find_index(const char * label, const char *drv)
 {
    unsigned i;
-   char str[256] = {0};
+   char str[256];
+
+   str[0] = '\0';
 
    for (i = 0; 
          find_driver_nonempty(label, i, str, sizeof(str)) != NULL; i++)
@@ -167,15 +176,16 @@ static bool driver_find_first(const char *label, char *s, size_t len)
 static bool driver_find_prev(const char *label, char *s, size_t len)
 {
    int i = driver_find_index(label, s);
+
    if (i > 0)
-      find_driver_nonempty(label, i - 1, s, len);
-   else
    {
-      RARCH_WARN(
-            "Couldn't find any previous driver (current one: \"%s\").\n", s);
-      return false;
+      find_driver_nonempty(label, i - 1, s, len);
+      return true;
    }
-   return true;
+
+   RARCH_WARN(
+         "Couldn't find any previous driver (current one: \"%s\").\n", s);
+   return false;
 }
 
 /**
@@ -189,16 +199,17 @@ static bool driver_find_prev(const char *label, char *s, size_t len)
 bool driver_find_next(const char *label, char *s, size_t len)
 {
    int i = driver_find_index(label, s);
+
    if (i >= 0 && !string_is_equal(s, "null"))
-      find_driver_nonempty(label, i + 1, s, len);
-   else
    {
-      RARCH_WARN("%s (current one: \"%s\").\n",
-            msg_hash_to_str(MSG_COULD_NOT_FIND_ANY_NEXT_DRIVER),
-            s);
-      return false;
+      find_driver_nonempty(label, i + 1, s, len);
+      return true;
    }
-   return true;
+
+   RARCH_WARN("%s (current one: \"%s\").\n",
+         msg_hash_to_str(MSG_COULD_NOT_FIND_ANY_NEXT_DRIVER),
+         s);
+   return false;
 }
 
 static void driver_adjust_system_rates(void)
@@ -292,6 +303,8 @@ static void init_drivers(int flags)
       camera_driver_ctl(RARCH_CAMERA_CTL_UNSET_OWN_DRIVER, NULL);
    if (flags & DRIVER_LOCATION)
       location_driver_ctl(RARCH_LOCATION_CTL_UNSET_OWN_DRIVER, NULL);
+   if (flags & DRIVER_WIFI)
+      wifi_driver_ctl(RARCH_WIFI_CTL_UNSET_OWN_DRIVER, NULL);
 
 #ifdef HAVE_MENU
    /* By default, we want the menu to persist through driver reinits. */
@@ -388,6 +401,9 @@ static void uninit_drivers(int flags)
    if (flags & DRIVER_AUDIO)
       audio_driver_deinit();
 
+   if ((flags & DRIVER_WIFI) && !wifi_driver_ctl(RARCH_WIFI_CTL_OWNS_DRIVER, NULL))
+      wifi_driver_ctl(RARCH_WIFI_CTL_DEINIT, NULL);
+
    if (flags & DRIVERS_VIDEO_INPUT)
       video_driver_deinit();
 
@@ -414,6 +430,7 @@ bool driver_ctl(enum driver_ctl_state state, void *data)
 #endif
          location_driver_ctl(RARCH_LOCATION_CTL_DESTROY, NULL);
          camera_driver_ctl(RARCH_CAMERA_CTL_DESTROY, NULL);
+         wifi_driver_ctl(RARCH_WIFI_CTL_DESTROY, NULL);
          core_uninit_libretro_callbacks();
          break;
       case RARCH_DRIVER_CTL_UNINIT:
@@ -447,6 +464,7 @@ bool driver_ctl(enum driver_ctl_state state, void *data)
          video_driver_find_driver();
          input_driver_find_driver();
          camera_driver_ctl(RARCH_CAMERA_CTL_FIND_DRIVER, NULL);
+         wifi_driver_ctl(RARCH_WIFI_CTL_FIND_DRIVER, NULL);
          find_location_driver();
 #ifdef HAVE_MENU
          menu_driver_ctl(RARCH_MENU_CTL_FIND_DRIVER, NULL);

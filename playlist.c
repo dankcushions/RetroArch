@@ -152,29 +152,28 @@ static void playlist_free_entry(struct playlist_entry *entry)
 
    if (entry->path)
       free(entry->path);
-   entry->path = NULL;
 
    if (entry->label)
       free(entry->label);
-   entry->label = NULL;
 
    if (entry->core_path)
       free(entry->core_path);
-   entry->core_path = NULL;
 
    if (entry->core_name)
       free(entry->core_name);
-   entry->core_name = NULL;
 
    if (entry->db_name)
       free(entry->db_name);
-   entry->core_name = NULL;
 
    if (entry->crc32)
       free(entry->crc32);
-   entry->crc32 = NULL;
 
-   memset(entry, 0, sizeof(*entry));
+   entry->path      = NULL;
+   entry->label     = NULL;
+   entry->core_path = NULL;
+   entry->core_name = NULL;
+   entry->db_name   = NULL;
+   entry->crc32     = NULL;
 }
 
 void playlist_update(playlist_t *playlist, size_t idx,
@@ -184,9 +183,8 @@ void playlist_update(playlist_t *playlist, size_t idx,
       const char *db_name)
 {
    struct playlist_entry *entry = NULL;
-   if (!playlist)
-      return;
-   if (idx > playlist->size)
+
+   if (!playlist || idx > playlist->size)
       return;
 
    entry            = &playlist->entries[idx];
@@ -245,14 +243,11 @@ bool playlist_push(playlist_t *playlist,
 {
    size_t i;
 
-   if (!playlist)
-      return false;
-
    if (string_is_empty(core_path) || string_is_empty(core_name))
    {
       if (string_is_empty(core_name) && !string_is_empty(core_path))
       {
-         static char base_path[PATH_MAX_LENGTH] = {0};
+         static char base_path[255] = {0};
          fill_pathname_base_noext(base_path, core_path, sizeof(base_path));
          core_name = base_path;
          RARCH_LOG("core_name is now: %s\n", core_name);
@@ -270,6 +265,9 @@ bool playlist_push(playlist_t *playlist,
 
    if (string_is_empty(path))
       path = NULL;
+
+   if (!playlist)
+      return false;
 
    for (i = 0; i < playlist->size; i++)
    {
@@ -302,7 +300,10 @@ bool playlist_push(playlist_t *playlist,
 
    if (playlist->size == playlist->cap)
    {
-      playlist_free_entry(&playlist->entries[playlist->cap - 1]);
+      struct playlist_entry *entry = &playlist->entries[playlist->cap - 1];
+
+      if (entry)
+         playlist_free_entry(entry);
       playlist->size--;
    }
 
@@ -383,7 +384,12 @@ void playlist_free(playlist_t *playlist)
    playlist->conf_path = NULL;
 
    for (i = 0; i < playlist->cap; i++)
-      playlist_free_entry(&playlist->entries[i]);
+   {
+      struct playlist_entry *entry = &playlist->entries[i];
+
+      if (entry)
+         playlist_free_entry(entry);
+   }
 
    free(playlist->entries);
    playlist->entries = NULL;
@@ -404,7 +410,12 @@ void playlist_clear(playlist_t *playlist)
       return;
 
    for (i = 0; i < playlist->cap; i++)
-      playlist_free_entry(&playlist->entries[i]);
+   {
+      struct playlist_entry *entry = &playlist->entries[i];
+
+      if (entry)
+         playlist_free_entry(entry);
+   }
    playlist->size = 0;
 }
 
@@ -427,10 +438,12 @@ static bool playlist_read_file(
       playlist_t *playlist, const char *path)
 {
    unsigned i;
-   char buf[PLAYLIST_ENTRIES][1024] = {{0}};
-   struct playlist_entry *entry     = NULL;
-   char *last                       = NULL;
-   RFILE *file                      = filestream_open(path, RFILE_MODE_READ_TEXT, -1);
+   char buf[PLAYLIST_ENTRIES][1024];
+   RFILE *file                      = filestream_open(
+         path, RFILE_MODE_READ_TEXT, -1);
+
+   for (i = 0; i < PLAYLIST_ENTRIES; i++)
+      buf[i][0] = '\0';
 
    /* If playlist file does not exist,
     * create an empty playlist instead.
@@ -440,9 +453,12 @@ static bool playlist_read_file(
 
    for (playlist->size = 0; playlist->size < playlist->cap; )
    {
+      unsigned i;
+      struct playlist_entry *entry     = NULL;
       for (i = 0; i < PLAYLIST_ENTRIES; i++)
       {
-         *buf[i] = '\0';
+         char *last  = NULL;
+         *buf[i]     = '\0';
 
          if (!filestream_gets(file, buf[i], sizeof(buf[i])))
             goto end;

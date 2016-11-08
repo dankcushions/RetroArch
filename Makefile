@@ -31,6 +31,12 @@ ifeq ($(shell $(CC) -v 2>&1 | grep -c "clang"),1)
    DEFINES +=  -Wno-invalid-source-encoding
 endif
 
+ifeq ($(shell $(CC) -v 2>&1 | grep -c "tcc"),1)
+   MD = -MD
+else
+   MD = -MMD
+endif
+
 HEADERS = $(wildcard */*/*.h) $(wildcard */*.h) $(wildcard *.h)
 
 ifeq ($(MISSING_DECLS), 1)
@@ -55,9 +61,10 @@ ifeq ($(DEBUG), 1)
    OPTIMIZE_FLAG = -O0 -g
 else
    OPTIMIZE_FLAG = -O3 -ffast-math
-   ifneq ($(findstring Win32,$(OS)),)
-      LDFLAGS += -mwindows
-   endif
+endif
+
+ifneq ($(findstring Win32,$(OS)),)
+   LDFLAGS += -mwindows
 endif
 
 CFLAGS   += -Wall $(OPTIMIZE_FLAG) $(INCLUDE_DIRS) $(DEBUG_FLAG) -I.
@@ -136,7 +143,7 @@ retroarch: $(RARCH_OBJ)
 $(OBJDIR)/%.o: %.c config.h config.mk
 	@mkdir -p $(dir $@)
 	@$(if $(Q), $(shell echo echo CC $<),)
-	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFINES) -MMD -c -o $@ $<
+	$(Q)$(CC) $(CPPFLAGS) $(CFLAGS) $(DEFINES) $(MD) -c -o $@ $<
 
 $(OBJDIR)/%.o: %.cpp config.h config.mk
 	@mkdir -p $(dir $@)
@@ -189,6 +196,7 @@ install: $(TARGET)
 		rm -rf $(DESTDIR)$(ASSETS_DIR)/retroarch/assets/xmb/flatui/src; \
 		rm -rf $(DESTDIR)$(ASSETS_DIR)/retroarch/assets/xmb/monochrome/src; \
 		rm -rf $(DESTDIR)$(ASSETS_DIR)/retroarch/assets/xmb/retroactive/src; \
+		rm -rf $(DESTDIR)$(ASSETS_DIR)/retroarch/assets/xmb/neoactive/src; \
 		rm -rf $(DESTDIR)$(ASSETS_DIR)/retroarch/assets/xmb/retroactive_marked/src; \
 		echo "Asset copying done."; \
 	fi

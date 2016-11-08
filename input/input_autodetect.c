@@ -22,16 +22,13 @@
 #include <file/file_path.h>
 #include <string/stdstring.h>
 
-#ifdef HAVE_CONFIG_H
-#include "../config.h"
-#endif
-
 #include "input_config.h"
 #include "input_autodetect.h"
 
 #include "../configuration.h"
 #include "../file_path_special.h"
 #include "../list_special.h"
+#include "../msg_hash.h"
 #include "../runloop.h"
 #include "../verbosity.h"
 
@@ -77,15 +74,14 @@ static void input_autoconfigure_joypad_conf(config_file_t *conf,
 static int input_try_autoconfigure_joypad_from_conf(config_file_t *conf,
       autoconfig_params_t *params)
 {
+   char ident[256];
+   char input_driver[32];
    int tmp_int                        = 0;
-   char ident[PATH_MAX_LENGTH]        = {0};
-   char input_driver[PATH_MAX_LENGTH] = {0};
    int                      input_vid = 0;
    int                      input_pid = 0;
    int                          score = 0;
 
-   if (!conf)
-      return false;
+   ident[0] = input_driver[0]         = '\0';
 
    config_get_array(conf, "input_device", ident, sizeof(ident));
    config_get_array(conf, "input_driver", input_driver, sizeof(input_driver));
@@ -111,7 +107,7 @@ static int input_try_autoconfigure_joypad_from_conf(config_file_t *conf,
    else
    {
       if (!string_is_empty(ident) 
-            && !strncmp(params->name, ident, strlen(ident)))
+            && string_is_equal(params->name, ident))
          score += 1;
    }
 
@@ -121,12 +117,14 @@ static int input_try_autoconfigure_joypad_from_conf(config_file_t *conf,
 static void input_autoconfigure_joypad_add(config_file_t *conf,
       autoconfig_params_t *params)
 {
-   bool block_osd_spam;
+   char msg[128];
+   char display_name[128];
+   char device_type[128];
+   bool block_osd_spam                = false;
    static bool remote_is_bound        = false;
-   char msg[PATH_MAX_LENGTH]          = {0};
-   char display_name[PATH_MAX_LENGTH] = {0};
-   char device_type[PATH_MAX_LENGTH]  = {0};
    settings_t      *settings          = config_get_ptr();
+
+   msg[0] = display_name[0] = device_type[0] = '\0';
 
    config_get_array(conf, "input_device_display_name",
          display_name, sizeof(display_name));
@@ -147,7 +145,7 @@ static void input_autoconfigure_joypad_add(config_file_t *conf,
 
    if (string_is_equal(device_type, "remote"))
    {
-      snprintf(msg, sizeof(msg), "%s configured",
+      snprintf(msg, sizeof(msg), "%s configured.",
             string_is_empty(display_name) ? params->name : display_name);
 
       if(!remote_is_bound)
@@ -156,8 +154,9 @@ static void input_autoconfigure_joypad_add(config_file_t *conf,
    }
    else
    {
-      snprintf(msg, sizeof(msg), "%s configured in port #%u.",
+      snprintf(msg, sizeof(msg), "%s %s #%u.",
             string_is_empty(display_name) ? params->name : display_name,
+            msg_hash_to_str(MSG_DEVICE_CONFIGURED_IN_PORT),
             params->idx);
 
       if (!block_osd_spam)
@@ -166,16 +165,10 @@ static void input_autoconfigure_joypad_add(config_file_t *conf,
    input_reindex_devices();
 }
 
-#if defined(HAVE_BUILTIN_AUTOCONFIG)
 static int input_autoconfigure_joypad_from_conf(
       config_file_t *conf, autoconfig_params_t *params)
 {
-   int ret = 0;
-
-   if (!conf)
-      return false;
-
-   ret = input_try_autoconfigure_joypad_from_conf(conf,
+   int ret = input_try_autoconfigure_joypad_from_conf(conf,
          params);
 
    if (ret)
@@ -185,18 +178,19 @@ static int input_autoconfigure_joypad_from_conf(
 
    return ret;
 }
-#endif
 
 static bool input_autoconfigure_joypad_from_conf_dir(
       autoconfig_params_t *params)
 {
    size_t i;
-   char path[PATH_MAX_LENGTH] = {0};
+   char path[PATH_MAX_LENGTH];
    int ret                    = 0;
    int index                  = -1;
    int current_best           = 0;
    config_file_t *conf        = NULL;
    struct string_list *list   = NULL;
+
+   path[0]                    = '\0';
 
    fill_pathname_application_special(path, sizeof(path),
          APPLICATION_SPECIAL_DIRECTORY_AUTOCONFIG);
@@ -215,12 +209,14 @@ static bool input_autoconfigure_joypad_from_conf_dir(
    if(!list)
       return false;
 
-   RARCH_LOG("Autodetect: %d profiles found\n", list->size);
+   RARCH_LOG("Autodetect: %d profiles found.\n", list->size);
 
    for (i = 0; i < list->size; i++)
    {
       conf = config_file_new(list->elems[i].data);
-      ret  = input_try_autoconfigure_joypad_from_conf(conf, params);
+
+      if (conf)
+         ret  = input_try_autoconfigure_joypad_from_conf(conf, params);
 
       if(ret >= current_best)
       {
@@ -237,6 +233,8 @@ static bool input_autoconfigure_joypad_from_conf_dir(
       if (conf)
       {
          char conf_path[PATH_MAX_LENGTH];
+
+         conf_path[0] = '\0';
 
          config_get_config_path(conf, conf_path, sizeof(conf_path));
 
@@ -256,29 +254,25 @@ static bool input_autoconfigure_joypad_from_conf_dir(
    return true;
 }
 
-#if defined(HAVE_BUILTIN_AUTOCONFIG)
 static bool input_autoconfigure_joypad_from_conf_internal(
       autoconfig_params_t *params)
 {
    size_t i;
    settings_t *settings = config_get_ptr();
-   bool             ret = false;
 
    /* Load internal autoconfig files  */
    for (i = 0; input_builtin_autoconfs[i]; i++)
    {
       config_file_t *conf = config_file_new_from_string(
             input_builtin_autoconfs[i]);
-
-      if ((ret = input_autoconfigure_joypad_from_conf(conf, params)))
-         break;
+      if (conf && input_autoconfigure_joypad_from_conf(conf, params))
+         return true;
    }
 
-   if (ret || !*settings->directory.autoconfig)
+   if (string_is_empty(settings->directory.autoconfig))
       return true;
    return false;
 }
-#endif
 
 static bool input_config_autoconfigure_joypad_init(autoconfig_params_t *params)
 {
@@ -302,7 +296,9 @@ static bool input_config_autoconfigure_joypad_init(autoconfig_params_t *params)
 
 bool input_config_autoconfigure_joypad(autoconfig_params_t *params)
 {
-   char msg[PATH_MAX_LENGTH];
+   char msg[255];
+
+   msg[0] = '\0';
 
    if (!input_config_autoconfigure_joypad_init(params))
       goto error;
@@ -312,15 +308,14 @@ bool input_config_autoconfigure_joypad(autoconfig_params_t *params)
 
    if (input_autoconfigure_joypad_from_conf_dir(params))
       return true;
-#if defined(HAVE_BUILTIN_AUTOCONFIG)
    if (input_autoconfigure_joypad_from_conf_internal(params))
       return true;
-#endif
 
-   RARCH_LOG("Autodetect: no profiles found for %s (%d/%d)\n",
+   RARCH_LOG("Autodetect: no profiles found for %s (%d/%d).\n",
          params->name, params->vid, params->pid);
-   snprintf(msg, sizeof(msg), "%s (%ld/%ld) not configured",
-         params->name, (long)params->vid, (long)params->pid);
+   snprintf(msg, sizeof(msg), "%s (%ld/%ld) %s.",
+         params->name, (long)params->vid, (long)params->pid,
+         msg_hash_to_str(MSG_DEVICE_NOT_CONFIGURED));
    runloop_msg_queue_push(msg, 2, 60, false);
 
 error:
@@ -342,9 +337,14 @@ const struct retro_keybind *input_get_auto_bind(unsigned port, unsigned id)
 
 void input_config_autoconfigure_disconnect(unsigned i, const char *ident)
 {
-   char msg[PATH_MAX_LENGTH];
+   char msg[255];
 
-   snprintf(msg, sizeof(msg), "Device #%u (%s) disconnected.", i, ident);
+   msg[0] = '\0';
+
+   snprintf(msg, sizeof(msg), "%s #%u (%s).", 
+         msg_hash_to_str(MSG_DEVICE_DISCONNECTED_FROM_PORT),
+         i, ident);
    runloop_msg_queue_push(msg, 2, 60, false);
-   RARCH_LOG("Autodetect: %s\n", msg);
+   RARCH_LOG("%s: %s\n", msg_hash_to_str(MSG_AUTODETECT), 
+         msg);
 }

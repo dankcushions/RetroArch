@@ -96,7 +96,7 @@ static bool x_is_pressed(x11_input_t *x11,
    if (id < RARCH_BIND_LIST_END)
    {
       const struct retro_keybind *bind = &binds[id];
-      return bind->valid && x_key_pressed(x11, binds[id].key);
+      return x_key_pressed(x11, binds[id].key);
    }
 
    return false;
@@ -111,36 +111,12 @@ static int16_t x_pressed_analog(x11_input_t *x11,
 
    input_conv_analog_id_to_bind_id(idx, id, &id_minus, &id_plus);
 
-   if (x_is_pressed(x11, binds, id_minus))
+   if (binds && binds[id_minus].valid && x_is_pressed(x11, binds, id_minus))
       pressed_minus = -0x7fff;
-   if (x_is_pressed(x11, binds, id_plus))
+   if (binds && binds[id_plus].valid && x_is_pressed(x11, binds, id_plus))
       pressed_plus  =  0x7fff;
 
    return pressed_plus + pressed_minus;
-}
-
-static bool x_input_key_pressed(void *data, int key)
-{
-   x11_input_t      *x11 = (x11_input_t*)data;
-   settings_t *settings  = config_get_ptr();
-   int port              = 0;
-
-   if (x_is_pressed(x11, settings->input.binds[0], key))
-      return true;
-
-   if (settings->input.all_users_control_menu)
-   {
-      for (port = 0; port < MAX_USERS; port++)
-         if (input_joypad_pressed(x11->joypad,
-               port, settings->input.binds[0], key))
-            return true;
-   }
-   else
-      if (input_joypad_pressed(x11->joypad,
-            0, settings->input.binds[0], key))
-         return true;
-
-   return false;
 }
 
 static bool x_input_meta_key_pressed(void *data, int key)
@@ -251,21 +227,22 @@ static int16_t x_input_state(void *data,
       const struct retro_keybind **binds, unsigned port,
       unsigned device, unsigned idx, unsigned id)
 {
-   int16_t ret;
+   int16_t ret      = 0;
    x11_input_t *x11 = (x11_input_t*)data;
 
    switch (device)
    {
       case RETRO_DEVICE_JOYPAD:
-         return x_is_pressed(x11, binds[port], id) ||
-            input_joypad_pressed(x11->joypad, port, binds[port], id);
-
+         if (binds[port] && binds[port][id].valid)
+            return x_is_pressed(x11, binds[port], id) ||
+               input_joypad_pressed(x11->joypad, port, binds[port], id);
+         break;
       case RETRO_DEVICE_KEYBOARD:
          return x_key_pressed(x11, id);
-
       case RETRO_DEVICE_ANALOG:
-         ret = x_pressed_analog(x11, binds[port], idx, id);
-         if (!ret)
+         if (binds[port])
+            ret = x_pressed_analog(x11, binds[port], idx, id);
+         if (!ret && binds[port] && binds[port])
             ret = input_joypad_analog(x11->joypad, port, idx,
                   id, binds[port]);
          return ret;
@@ -300,6 +277,8 @@ static void x_input_free(void *data)
    free(x11);
 }
 
+extern bool g_x11_entered;
+
 static void x_input_poll_mouse(x11_input_t *x11)
 {
    unsigned mask;
@@ -316,31 +295,34 @@ static void x_input_poll_mouse(x11_input_t *x11)
             &win_x, &win_y,
             &mask);
 
-   x11->mouse_x  = win_x;
-   x11->mouse_y  = win_y;
-   x11->mouse_l  = mask & Button1Mask; 
-   x11->mouse_m  = mask & Button2Mask; 
-   x11->mouse_r  = mask & Button3Mask; 
-
-   /* Somewhat hacky, but seem to do the job. */
-   if (x11->grab_mouse && video_driver_is_focused())
+   if (g_x11_entered)
    {
-      int mid_w, mid_h;
-      struct video_viewport vp = {0};
+      x11->mouse_x  = win_x;
+      x11->mouse_y  = win_y;
+      x11->mouse_l  = mask & Button1Mask; 
+      x11->mouse_m  = mask & Button2Mask; 
+      x11->mouse_r  = mask & Button3Mask; 
 
-      video_driver_get_viewport_info(&vp);
-
-      mid_w = vp.full_width >> 1;
-      mid_h = vp.full_height >> 1;
-
-      if (x11->mouse_x != mid_w || x11->mouse_y != mid_h)
+      /* Somewhat hacky, but seem to do the job. */
+      if (x11->grab_mouse && video_driver_is_focused())
       {
-         XWarpPointer(x11->display, None,
-               x11->win, 0, 0, 0, 0,
-               mid_w, mid_h);
+         int mid_w, mid_h;
+         struct video_viewport vp = {0};
+
+         video_driver_get_viewport_info(&vp);
+
+         mid_w = vp.full_width >> 1;
+         mid_h = vp.full_height >> 1;
+
+         if (x11->mouse_x != mid_w || x11->mouse_y != mid_h)
+         {
+            XWarpPointer(x11->display, None,
+                  x11->win, 0, 0, 0, 0,
+                  mid_w, mid_h);
+         }
+         x11->mouse_last_x = mid_w;
+         x11->mouse_last_y = mid_h;
       }
-      x11->mouse_last_x = mid_w;
-      x11->mouse_last_y = mid_h;
    }
 }
 
@@ -419,7 +401,6 @@ input_driver_t input_x = {
    x_input_init,
    x_input_poll,
    x_input_state,
-   x_input_key_pressed,
    x_input_meta_key_pressed,
    x_input_free,
    NULL,

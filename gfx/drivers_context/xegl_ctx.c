@@ -43,7 +43,7 @@ typedef struct
    bool should_reset_mode;
 } xegl_ctx_data_t;
 
-static enum gfx_ctx_api x_api;
+static enum gfx_ctx_api x_api = GFX_CTX_NONE;
 
 static int x_nul_handler(Display *dpy, XErrorEvent *event)
 {
@@ -84,6 +84,14 @@ static void gfx_ctx_xegl_destroy(void *data)
     */
 }
 
+#define XEGL_ATTRIBS_BASE \
+EGL_SURFACE_TYPE,    EGL_WINDOW_BIT, \
+EGL_RED_SIZE,        1, \
+EGL_GREEN_SIZE,      1, \
+EGL_BLUE_SIZE,       1, \
+EGL_ALPHA_SIZE,      0, \
+EGL_DEPTH_SIZE,      0
+
 static bool gfx_ctx_xegl_set_resize(void *data,
    unsigned width, unsigned height)
 {
@@ -92,14 +100,6 @@ static bool gfx_ctx_xegl_set_resize(void *data,
    (void)height;
    return false;
 }
-
-#define XEGL_ATTRIBS_BASE \
-EGL_SURFACE_TYPE,    EGL_WINDOW_BIT, \
-EGL_RED_SIZE,        1, \
-EGL_GREEN_SIZE,      1, \
-EGL_BLUE_SIZE,       1, \
-EGL_ALPHA_SIZE,      0, \
-EGL_DEPTH_SIZE,      0
 
 static void *gfx_ctx_xegl_init(void *video_driver)
 {
@@ -263,17 +263,17 @@ static bool gfx_ctx_xegl_set_video_mode(void *data,
 {
    XEvent event;
    EGLint egl_attribs[16];
-   EGLint *attr;
    EGLint vid, num_visuals;
-   bool windowed_full;
-   bool true_full = false;
-   int x_off = 0;
-   int y_off = 0;
-   XVisualInfo temp = {0};
+   EGLint *attr             = NULL;
+   bool windowed_full       = false;
+   bool true_full           = false;
+   int x_off                = 0;
+   int y_off                = 0;
+   XVisualInfo temp         = {0};
    XSetWindowAttributes swa = {0};
-   XVisualInfo *vi = NULL;
-   settings_t *settings = config_get_ptr();
-   xegl_ctx_data_t *xegl = (xegl_ctx_data_t*)data;
+   XVisualInfo *vi          = NULL;
+   settings_t *settings     = config_get_ptr();
+   xegl_ctx_data_t *xegl    = (xegl_ctx_data_t*)data;
 
    int (*old_handler)(Display*, XErrorEvent*) = NULL;
 
@@ -437,14 +437,6 @@ static void gfx_ctx_xegl_input_driver(void *data,
    *input_data  = xinput;
 }
 
-static bool gfx_ctx_xegl_has_focus(void *data)
-{
-   if (!g_egl_inited)
-      return false;
-
-   return x11_has_focus(data);
-}
-
 static bool gfx_ctx_xegl_suppress_screensaver(void *data, bool enable)
 {
    (void)data;
@@ -562,7 +554,6 @@ static gfx_ctx_proc_t gfx_ctx_xegl_get_proc_address(const char *symbol)
 {
    switch (x_api)
    {
-      case GFX_CTX_OPENGL_API:
       case GFX_CTX_OPENGL_ES_API:
       case GFX_CTX_OPENVG_API:
 #ifdef HAVE_EGL
@@ -570,6 +561,8 @@ static gfx_ctx_proc_t gfx_ctx_xegl_get_proc_address(const char *symbol)
 #else
          break;
 #endif
+      case GFX_CTX_OPENGL_API:
+         break;
       case GFX_CTX_NONE:
       default:
          break;
@@ -606,7 +599,7 @@ const gfx_ctx_driver_t gfx_ctx_x_egl =
    x11_update_window_title,
    x11_check_window,
    gfx_ctx_xegl_set_resize,
-   gfx_ctx_xegl_has_focus,
+   x11_has_focus,
    gfx_ctx_xegl_suppress_screensaver,
    gfx_ctx_xegl_has_windowed,
    gfx_ctx_xegl_swap_buffers,

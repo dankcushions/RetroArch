@@ -41,7 +41,8 @@
 #include <file/file_path.h>
 #include <retro_stat.h>
 #include <retro_assert.h>
-
+#include <retro_miscellaneous.h>
+#include <rthreads/rthreads.h>
 #include <features/features_cpu.h>
 
 #ifdef HAVE_CONFIG_H
@@ -56,6 +57,10 @@
 #include "menu/menu_driver.h"
 #endif
 
+#ifdef HAVE_NETWORKING
+#include "network/netplay/netplay.h"
+#endif
+
 #include "config.features.h"
 #include "content.h"
 #include "core_type.h"
@@ -64,6 +69,8 @@
 #include "driver.h"
 #include "msg_hash.h"
 #include "movie.h"
+#include "dirs.h"
+#include "paths.h"
 #include "file_path_special.h"
 #include "verbosity.h"
 
@@ -82,6 +89,13 @@
 #include "retroarch.h"
 
 #include "command.h"
+
+#define _PSUPP(var, name, desc) printf("  %s:\n\t\t%s: %s\n", name, desc, _##var##_supp ? "yes" : "no")
+
+#define FAIL_CPU(simd_type) do { \
+   RARCH_ERR(simd_type " code is compiled in, but CPU does not support this feature. Cannot continue.\n"); \
+   retroarch_fail(1, "validate_cpu_features()"); \
+} while(0)
 
 /* Descriptive names for options without short variant.
  *
@@ -109,14 +123,31 @@ enum
    RA_OPT_MAX_FRAMES
 };
 
-static bool current_core_explicitly_set                 = false;
+static jmp_buf error_sjlj_context;
 static enum rarch_core_type current_core_type           = CORE_TYPE_PLAIN;
 static enum rarch_core_type explicit_current_core_type  = CORE_TYPE_PLAIN;
-static char current_savefile_dir[PATH_MAX_LENGTH]       = {0};
-static char error_string[PATH_MAX_LENGTH]               = {0};
-static jmp_buf error_sjlj_context;
+static char error_string[255]                           = {0};
 
-#define _PSUPP(var, name, desc) printf("  %s:\n\t\t%s: %s\n", name, desc, _##var##_supp ? "yes" : "no")
+static retro_bits_t has_set_libretro_device;
+static bool has_set_core                                = false;
+static bool has_set_username                            = false;
+static bool rarch_is_inited                             = false;
+static bool rarch_error_on_init                         = false;
+static bool rarch_block_config_read                     = false;
+static bool rarch_force_fullscreen                      = false;
+static bool has_set_verbosity                           = false;
+static bool has_set_libretro                            = false;
+static bool has_set_libretro_directory                  = false;
+static bool has_set_save_path                           = false;
+static bool has_set_state_path                          = false;
+static bool has_set_netplay_mode                        = false;
+static bool has_set_netplay_ip_address                  = false;
+static bool has_set_netplay_ip_port                     = false;
+static bool has_set_netplay_delay_frames                = false;
+static bool has_set_netplay_check_frames                = false;
+static bool has_set_ups_pref                            = false;
+static bool has_set_bps_pref                            = false;
+static bool has_set_ips_pref                            = false;
 
 static void retroarch_print_features(void)
 {
@@ -197,7 +228,9 @@ static void retroarch_print_features(void)
 
 static void retroarch_print_version(void)
 {
-   char str[PATH_MAX_LENGTH] = {0};
+   char str[255];
+
+   str[0] = '\0';
 
    fprintf(stderr, "%s: %s -- v%s",
          msg_hash_to_str(MSG_PROGRAM),
@@ -302,7 +335,7 @@ static void retroarch_print_help(const char *arg0)
         "                        Note: 'noload-save' implies that "
         "save files *WILL BE OVERWRITTEN*.");
 
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
    puts("  -H, --host            Host netplay as user 1.");
    puts("  -C, --connect=HOST    Connect to netplay server as user 2.");
    puts("      --port=PORT       Port used to netplay. Default is 55435.");
@@ -310,14 +343,15 @@ static void retroarch_print_help(const char *arg0)
    puts("      --check-frames=NUMBER\n"
         "                        Check frames when using netplay.");
    puts("      --spectate        Connect to netplay server as spectator.");
-#endif
-   puts("      --nick=NICK       Picks a username (for use with netplay). "
-         "Not mandatory.");
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORK_CMD)
    puts("      --command         Sends a command over UDP to an already "
          "running program process.");
    puts("      Available commands are listed if command is invalid.");
 #endif
+
+#endif
+   puts("      --nick=NICK       Picks a username (for use with netplay). "
+         "Not mandatory.");
 
    puts("  -r, --record=FILE     Path to record video file.\n        "
          "Using .mkv extension is recommended.");
@@ -338,291 +372,6 @@ static void retroarch_print_help(const char *arg0)
         "then exits.\n");
 }
 
-static void retroarch_set_basename(const char *path)
-{
-   char *dst          = NULL;
-   global_t *global   = global_get_ptr();
-
-   runloop_ctl(RUNLOOP_CTL_SET_CONTENT_PATH, (void*)path);
-   strlcpy(global->name.base,     path, sizeof(global->name.base));
-
-#ifdef HAVE_COMPRESSION
-   /* Removing extension is a bit tricky for compressed files.
-    * Basename means:
-    * /file/to/path/game.extension should be:
-    * /file/to/path/game
-    *
-    * Two things to consider here are: /file/to/path/ is expected
-    * to be a directory and "game" is a single file. This is used for
-    * states and srm default paths.
-    *
-    * For compressed files we have:
-    *
-    * /file/to/path/comp.7z#game.extension and
-    * /file/to/path/comp.7z#folder/game.extension
-    *
-    * The choice I take here is:
-    * /file/to/path/game as basename. We might end up in a writable
-    * directory then and the name of srm and states are meaningful.
-    *
-    */
-   path_basedir(global->name.base);
-   fill_pathname_dir(global->name.base, path, "", sizeof(global->name.base));
-#endif
-
-   if ((dst = strrchr(global->name.base, '.')))
-      *dst = '\0';
-}
-
-static void retroarch_set_special_paths(char **argv, unsigned num_content)
-{
-   unsigned i;
-   union string_list_elem_attr attr;
-   global_t   *global   = global_get_ptr();
-
-   /* First content file is the significant one. */
-   retroarch_set_basename(argv[0]);
-
-   global->subsystem_fullpaths = string_list_new();
-   retro_assert(global->subsystem_fullpaths);
-
-   attr.i = 0;
-
-   for (i = 0; i < num_content; i++)
-      string_list_append(global->subsystem_fullpaths, argv[i], attr);
-
-   /* We defer SRAM path updates until we can resolve it.
-    * It is more complicated for special content types. */
-
-   if (!retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_STATE_PATH))
-      fill_pathname_noext(global->name.savestate, global->name.base,
-            file_path_str(FILE_PATH_STATE_EXTENSION),
-            sizeof(global->name.savestate));
-
-   if (path_is_directory(global->name.savestate))
-   {
-      fill_pathname_dir(global->name.savestate, global->name.base,
-            file_path_str(FILE_PATH_STATE_EXTENSION),
-            sizeof(global->name.savestate));
-      RARCH_LOG("%s \"%s\".\n",
-            msg_hash_to_str(MSG_REDIRECTING_SAVESTATE_TO),
-            global->name.savestate);
-   }
-}
-
-#define MENU_VALUE_NO_CORE 0x7d5472cbU
-
-static void retroarch_set_paths_redirect(void)
-{
-   char current_savestate_dir[PATH_MAX_LENGTH] = {0};
-   uint32_t global_library_name_hash           = 0;
-   bool check_global_library_name_hash         = false;
-   global_t                *global             = global_get_ptr();
-   settings_t              *settings           = config_get_ptr();
-   rarch_system_info_t      *info              = NULL;
-
-   runloop_ctl(RUNLOOP_CTL_SYSTEM_INFO_GET, &info);
-
-   if (!global)
-      return;
-
-   if (info->info.library_name &&
-         !string_is_empty(info->info.library_name))
-      global_library_name_hash =
-         msg_hash_calculate(info->info.library_name);
-
-   /* Initialize current save directories
-    * with the values from the config. */
-   strlcpy(current_savefile_dir,
-         global->dir.savefile,
-         sizeof(current_savefile_dir));
-   strlcpy(current_savestate_dir,
-         global->dir.savestate,
-         sizeof(current_savestate_dir));
-
-   check_global_library_name_hash = (global_library_name_hash != 0);
-#ifdef HAVE_MENU
-   check_global_library_name_hash = check_global_library_name_hash &&
-      (global_library_name_hash != MENU_VALUE_NO_CORE);
-#endif
-
-   if (check_global_library_name_hash)
-   {
-      /* per-core saves: append the library_name to the save location */
-      if (settings->sort_savefiles_enable
-            && !string_is_empty(global->dir.savefile))
-      {
-         fill_pathname_join(
-               current_savefile_dir,
-               global->dir.savefile,
-               info->info.library_name,
-               sizeof(global->dir.savefile));
-
-         /* If path doesn't exist, try to create it,
-          * if everything fails revert to the original path. */
-         if(!path_is_directory(current_savefile_dir)
-               && !string_is_empty(current_savefile_dir))
-         {
-            path_mkdir(current_savefile_dir);
-            if(!path_is_directory(current_savefile_dir))
-            {
-               RARCH_LOG("%s %s\n",
-                     msg_hash_to_str(MSG_REVERTING_SAVEFILE_DIRECTORY_TO),
-                     global->dir.savefile);
-
-               strlcpy(current_savefile_dir,
-                     global->dir.savefile,
-                     sizeof(current_savefile_dir));
-            }
-         }
-      }
-
-      /* per-core states: append the library_name to the save location */
-      if (settings->sort_savestates_enable
-            && !string_is_empty(global->dir.savestate))
-      {
-         fill_pathname_join(
-               current_savestate_dir,
-               global->dir.savestate,
-               info->info.library_name,
-               sizeof(global->dir.savestate));
-
-         /* If path doesn't exist, try to create it.
-          * If everything fails, revert to the original path. */
-         if(!path_is_directory(current_savestate_dir) &&
-               !string_is_empty(current_savestate_dir))
-         {
-            path_mkdir(current_savestate_dir);
-            if(!path_is_directory(current_savestate_dir))
-            {
-               RARCH_LOG("%s %s\n",
-                     msg_hash_to_str(MSG_REVERTING_SAVESTATE_DIRECTORY_TO),
-                     global->dir.savestate);
-               strlcpy(current_savestate_dir,
-                     global->dir.savestate,
-                     sizeof(current_savestate_dir));
-            }
-         }
-      }
-   }
-
-   /* Set savefile directory if empty based on content directory */
-   if (string_is_empty(current_savefile_dir))
-   {
-      global_t *global = global_get_ptr();
-      strlcpy(current_savefile_dir, global->name.base,
-            sizeof(current_savefile_dir));
-      path_basedir(current_savefile_dir);
-   }
-
-   if(path_is_directory(current_savefile_dir))
-      strlcpy(global->name.savefile, current_savefile_dir,
-            sizeof(global->name.savefile));
-
-   if(path_is_directory(current_savestate_dir))
-      strlcpy(global->name.savestate, current_savestate_dir,
-            sizeof(global->name.savestate));
-
-   if (path_is_directory(global->name.savefile))
-   {
-      fill_pathname_dir(global->name.savefile, global->name.base,
-            file_path_str(FILE_PATH_SRM_EXTENSION),
-            sizeof(global->name.savefile));
-      RARCH_LOG("%s \"%s\".\n",
-            msg_hash_to_str(MSG_REDIRECTING_SAVEFILE_TO),
-            global->name.savefile);
-   }
-
-   if (path_is_directory(global->name.savestate))
-   {
-      fill_pathname_dir(global->name.savestate, global->name.base,
-            file_path_str(FILE_PATH_STATE_EXTENSION),
-            sizeof(global->name.savestate));
-      RARCH_LOG("%s \"%s\".\n",
-            msg_hash_to_str(MSG_REDIRECTING_SAVESTATE_TO),
-            global->name.savestate);
-   }
-
-   if (path_is_directory(global->name.cheatfile))
-   {
-      fill_pathname_dir(global->name.cheatfile, global->name.base,
-            file_path_str(FILE_PATH_STATE_EXTENSION),
-            sizeof(global->name.cheatfile));
-      RARCH_LOG("%s \"%s\".\n",
-            msg_hash_to_str(MSG_REDIRECTING_CHEATFILE_TO),
-            global->name.cheatfile);
-   }
-}
-
-const char *retroarch_get_current_savefile_dir(void)
-{
-   char *ret = current_savefile_dir;
-
-   /* try to infer the path in case it's still empty by calling
-   set_paths_redirect */
-   if (string_is_empty(ret) && !content_does_not_need_content())
-      retroarch_set_paths_redirect();
-
-   return ret;
-}
-
-enum rarch_content_type retroarch_path_is_media_type(const char *path)
-{
-   char ext_lower[PATH_MAX_LENGTH] = {0};
-
-   strlcpy(ext_lower, path_get_extension(path), sizeof(ext_lower));
-
-   string_to_lower(ext_lower);
-
-   switch (msg_hash_to_file_type(msg_hash_calculate(ext_lower)))
-   {
-#ifdef HAVE_FFMPEG
-      case FILE_TYPE_OGM:
-      case FILE_TYPE_MKV:
-      case FILE_TYPE_AVI:
-      case FILE_TYPE_MP4:
-      case FILE_TYPE_FLV:
-      case FILE_TYPE_WEBM:
-      case FILE_TYPE_3GP:
-      case FILE_TYPE_3G2:
-      case FILE_TYPE_F4F:
-      case FILE_TYPE_F4V:
-      case FILE_TYPE_MOV:
-      case FILE_TYPE_WMV:
-      case FILE_TYPE_MPG:
-      case FILE_TYPE_MPEG:
-      case FILE_TYPE_VOB:
-      case FILE_TYPE_ASF:
-      case FILE_TYPE_DIVX:
-      case FILE_TYPE_M2P:
-      case FILE_TYPE_M2TS:
-      case FILE_TYPE_PS:
-      case FILE_TYPE_TS:
-      case FILE_TYPE_MXF:
-         return RARCH_CONTENT_MOVIE;
-      case FILE_TYPE_WMA:
-      case FILE_TYPE_OGG:
-      case FILE_TYPE_MP3:
-      case FILE_TYPE_M4A:
-      case FILE_TYPE_FLAC:
-      case FILE_TYPE_WAV:
-         return RARCH_CONTENT_MUSIC;
-#endif
-#ifdef HAVE_IMAGEVIEWER
-      case FILE_TYPE_JPEG:
-      case FILE_TYPE_PNG:
-      case FILE_TYPE_TGA:
-      case FILE_TYPE_BMP:
-         return RARCH_CONTENT_IMAGE;
-#endif
-      case FILE_TYPE_NONE:
-      default:
-         break;
-   }
-
-   return RARCH_CONTENT_NONE;
-}
-
 #define FFMPEG_RECORD_ARG "r:"
 
 #ifdef HAVE_DYNAMIC
@@ -631,12 +380,11 @@ enum rarch_content_type retroarch_path_is_media_type(const char *path)
 #define DYNAMIC_ARG
 #endif
 
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
 #define NETPLAY_ARG "HC:F:"
 #else
 #define NETPLAY_ARG
 #endif
-
 
 #define BSV_MOVIE_ARG "P:R:M:"
 
@@ -651,9 +399,9 @@ enum rarch_content_type retroarch_path_is_media_type(const char *path)
 static void retroarch_parse_input(int argc, char *argv[])
 {
    const char *optstring = NULL;
-   global_t  *global     = global_get_ptr();
-   settings_t *settings  = config_get_ptr();
    bool explicit_menu    = false;
+   settings_t *settings  = config_get_ptr();
+   global_t  *global     = global_get_ptr();
 
    const struct option opts[] = {
 #ifdef HAVE_DYNAMIC
@@ -676,18 +424,18 @@ static void retroarch_parse_input(int argc, char *argv[])
       { "bsvplay",      1, NULL, 'P' },
       { "bsvrecord",    1, NULL, 'R' },
       { "sram-mode",    1, NULL, 'M' },
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
       { "host",         0, NULL, 'H' },
       { "connect",      1, NULL, 'C' },
       { "frames",       1, NULL, 'F' },
       { "check-frames", 1, NULL, RA_OPT_CHECK_FRAMES },
       { "port",         1, NULL, RA_OPT_PORT },
       { "spectate",     0, NULL, RA_OPT_SPECTATE },
-#endif
-      { "nick",         1, NULL, RA_OPT_NICK },
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORK_CMD)
       { "command",      1, NULL, RA_OPT_COMMAND },
 #endif
+#endif
+      { "nick",         1, NULL, RA_OPT_NICK },
       { "ups",          1, NULL, 'U' },
       { "bps",          1, NULL, RA_OPT_BPS },
       { "ips",          1, NULL, RA_OPT_IPS },
@@ -726,18 +474,17 @@ static void retroarch_parse_input(int argc, char *argv[])
     * bogus arguments.
     */
 
-   if (!current_core_explicitly_set)
+   if (!has_set_core)
       retroarch_set_current_core_type(CORE_TYPE_DUMMY, false);
 
-   *global->subsystem                    = '\0';
+   path_clear(RARCH_PATH_SUBSYSTEM);
 
    retroarch_override_setting_free_state();
 
    rarch_ctl(RARCH_CTL_USERNAME_UNSET, NULL);
-
-   global->patch.ups_pref                = false;
-   global->patch.bps_pref                = false;
-   global->patch.ips_pref                = false;
+   rarch_ctl(RARCH_CTL_UNSET_UPS_PREF, NULL);
+   rarch_ctl(RARCH_CTL_UNSET_IPS_PREF, NULL);
+   rarch_ctl(RARCH_CTL_UNSET_BPS_PREF, NULL);
    *global->name.ups                     = '\0';
    *global->name.bps                     = '\0';
    *global->name.ips                     = '\0';
@@ -752,7 +499,7 @@ static void retroarch_parse_input(int argc, char *argv[])
 #ifndef HAVE_MENU
    if (argc == 1)
    {
-      printf("No arguments supplied and no menu builtin, displaying help...\n");
+      printf("%s\n", msg_hash_to_str(MSG_NO_ARGUMENTS_SUPPLIED_AND_NO_MENU_BUILTIN));
       retroarch_print_help(argv[0]);
       exit(0);
    }
@@ -778,6 +525,7 @@ static void retroarch_parse_input(int argc, char *argv[])
 
          case 'd':
          {
+            unsigned new_port;
             unsigned id = 0;
             struct string_list *list = string_split(optarg, ":");
 
@@ -796,12 +544,17 @@ static void retroarch_parse_input(int argc, char *argv[])
                retroarch_print_help(argv[0]);
                retroarch_fail(1, "retroarch_parse_input()");
             }
-            settings->input.libretro_device[port - 1] = id;
-            global->has_set.libretro_device[port - 1] = true;
+            new_port = port -1;
+            settings->input.libretro_device[new_port] = id;
+
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE, &new_port);
             break;
          }
 
          case 'A':
+         {
+            unsigned new_port;
             port = strtol(optarg, NULL, 0);
             if (port < 1 || port > MAX_USERS)
             {
@@ -809,14 +562,19 @@ static void retroarch_parse_input(int argc, char *argv[])
                retroarch_print_help(argv[0]);
                retroarch_fail(1, "retroarch_parse_input()");
             }
-            settings->input.libretro_device[port - 1] = RETRO_DEVICE_ANALOG;
-            global->has_set.libretro_device[port - 1] = true;
+            new_port = port - 1;
+
+            settings->input.libretro_device[new_port] = RETRO_DEVICE_ANALOG;
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE, &new_port);
+         }
             break;
 
          case 's':
             strlcpy(global->name.savefile, optarg,
                   sizeof(global->name.savefile));
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_SAVE_PATH);
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_SAVE_PATH, NULL);
             break;
 
          case 'f':
@@ -826,30 +584,36 @@ static void retroarch_parse_input(int argc, char *argv[])
          case 'S':
             strlcpy(global->name.savestate, optarg,
                   sizeof(global->name.savestate));
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_STATE_PATH);
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_STATE_PATH, NULL);
             break;
 
          case 'v':
             verbosity_enable();
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_VERBOSITY);
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_VERBOSITY, NULL);
             break;
 
          case 'N':
-            port = strtol(optarg, NULL, 0);
-            if (port < 1 || port > MAX_USERS)
             {
-               RARCH_ERR("%s\n",
-                     msg_hash_to_str(MSG_VALUE_DISCONNECT_DEVICE_FROM_A_VALID_PORT));
-               retroarch_print_help(argv[0]);
-               retroarch_fail(1, "retroarch_parse_input()");
+               unsigned new_port;
+               port = strtol(optarg, NULL, 0);
+               if (port < 1 || port > MAX_USERS)
+               {
+                  RARCH_ERR("%s\n",
+                        msg_hash_to_str(MSG_DISCONNECT_DEVICE_FROM_A_VALID_PORT));
+                  retroarch_print_help(argv[0]);
+                  retroarch_fail(1, "retroarch_parse_input()");
+               }
+               new_port = port - 1;
+               settings->input.libretro_device[port - 1] = RETRO_DEVICE_NONE;
+               retroarch_override_setting_set(
+                     RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE, &new_port);
             }
-            settings->input.libretro_device[port - 1] = RETRO_DEVICE_NONE;
-            global->has_set.libretro_device[port - 1] = true;
             break;
 
          case 'c':
-            strlcpy(global->path.config, optarg,
-                  sizeof(global->path.config));
+            path_set(RARCH_PATH_CONFIG, optarg);
             break;
 
          case 'r':
@@ -867,12 +631,12 @@ static void retroarch_parse_input(int argc, char *argv[])
          case 'L':
             if (path_is_directory(optarg))
             {
-               config_clear_active_core_path();
+               path_clear(RARCH_PATH_CORE);
                strlcpy(settings->directory.libretro, optarg,
                      sizeof(settings->directory.libretro));
 
-               retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO);
-               retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO_DIRECTORY);
+               retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO, NULL);
+               retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO_DIRECTORY, NULL);
                RARCH_WARN("Using old --libretro behavior. "
                      "Setting libretro_directory to \"%s\" instead.\n",
                      optarg);
@@ -880,7 +644,7 @@ static void retroarch_parse_input(int argc, char *argv[])
             else if (path_file_exists(optarg))
             {
                runloop_ctl(RUNLOOP_CTL_SET_LIBRETRO_PATH, optarg);
-               retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO);
+               retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO, NULL);
 
                /* We requested explicit core, so use PLAIN core type. */
                retroarch_set_current_core_type(CORE_TYPE_PLAIN, false);
@@ -911,13 +675,13 @@ static void retroarch_parse_input(int argc, char *argv[])
          case 'M':
             if (string_is_equal(optarg, "noload-nosave"))
             {
-               global->sram.load_disable = true;
-               global->sram.save_disable = true;
+               rarch_ctl(RARCH_CTL_SET_SRAM_LOAD_DISABLED, NULL);
+               rarch_ctl(RARCH_CTL_SET_SRAM_SAVE_DISABLED, NULL);
             }
             else if (string_is_equal(optarg, "noload-save"))
-               global->sram.load_disable = true;
+               rarch_ctl(RARCH_CTL_SET_SRAM_LOAD_DISABLED, NULL);
             else if (string_is_equal(optarg, "load-nosave"))
-               global->sram.save_disable = true;
+               rarch_ctl(RARCH_CTL_SET_SRAM_SAVE_DISABLED, NULL);
             else if (!string_is_equal(optarg, "load-save"))
             {
                RARCH_ERR("Invalid argument in --sram-mode.\n");
@@ -926,85 +690,48 @@ static void retroarch_parse_input(int argc, char *argv[])
             }
             break;
 
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
          case 'H':
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_NETPLAY_IP_ADDRESS);
-            global->netplay.enable = true;
-            *global->netplay.server = '\0';
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_NETPLAY_MODE, NULL);
+            netplay_driver_ctl(RARCH_NETPLAY_CTL_ENABLE_SERVER, NULL);
             break;
 
          case 'C':
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_NETPLAY_IP_ADDRESS);
-            global->netplay.enable = true;
-            strlcpy(global->netplay.server, optarg,
-                  sizeof(global->netplay.server));
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_NETPLAY_MODE, NULL);
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_NETPLAY_IP_ADDRESS, NULL);
+            netplay_driver_ctl(RARCH_NETPLAY_CTL_ENABLE_CLIENT, NULL);
+            strlcpy(settings->netplay.server, optarg,
+                  sizeof(settings->netplay.server));
             break;
 
          case 'F':
-            global->netplay.sync_frames = strtol(optarg, NULL, 0);
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_NETPLAY_DELAY_FRAMES);
-            break;
-#endif
-
-         case RA_OPT_BPS:
-            strlcpy(global->name.bps, optarg,
-                  sizeof(global->name.bps));
-            global->patch.bps_pref   = true;
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_BPS_PREF);
+            settings->netplay.sync_frames = strtol(optarg, NULL, 0);
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_NETPLAY_DELAY_FRAMES, NULL);
             break;
 
-         case 'U':
-            strlcpy(global->name.ups, optarg,
-                  sizeof(global->name.ups));
-            global->patch.ups_pref   = true;
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_UPS_PREF);
-            break;
-
-         case RA_OPT_IPS:
-            strlcpy(global->name.ips, optarg,
-                  sizeof(global->name.ips));
-            global->patch.ips_pref   = true;
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_IPS_PREF);
-            break;
-
-         case RA_OPT_NO_PATCH:
-            global->patch.block_patch = true;
-            break;
-
-         case 'D':
-#if defined(_WIN32) && !defined(_XBOX)
-            FreeConsole();
-#endif
-            break;
-
-         case RA_OPT_MENU:
-            explicit_menu = true;
-            break;
-
-#ifdef HAVE_NETPLAY
          case RA_OPT_CHECK_FRAMES:
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_NETPLAY_CHECK_FRAMES);
-            global->netplay.check_frames = strtoul(optarg, NULL, 0);
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_NETPLAY_CHECK_FRAMES, NULL);
+            settings->netplay.check_frames = strtoul(optarg, NULL, 0);
             break;
 
          case RA_OPT_PORT:
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_NETPLAY_IP_PORT);
-            global->netplay.port = strtoul(optarg, NULL, 0);
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_NETPLAY_IP_PORT, NULL);
+            settings->netplay.port = strtoul(optarg, NULL, 0);
             break;
 
          case RA_OPT_SPECTATE:
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_NETPLAY_MODE);
-            global->netplay.is_spectate = true;
+            retroarch_override_setting_set(
+                  RARCH_OVERRIDE_SETTING_NETPLAY_MODE, NULL);
+            settings->netplay.is_spectate = true;
             break;
 
-#endif
-         case RA_OPT_NICK:
-            rarch_ctl(RARCH_CTL_USERNAME_SET, NULL);
-            strlcpy(settings->username, optarg,
-                  sizeof(settings->username));
-            break;
-
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORK_CMD)
          case RA_OPT_COMMAND:
             if (command_network_send((const char*)optarg))
                exit(0);
@@ -1013,22 +740,61 @@ static void retroarch_parse_input(int argc, char *argv[])
             break;
 #endif
 
+#endif
+
+         case RA_OPT_BPS:
+            strlcpy(global->name.bps, optarg,
+                  sizeof(global->name.bps));
+            rarch_ctl(RARCH_CTL_SET_BPS_PREF, NULL);
+            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_BPS_PREF, NULL);
+            break;
+
+         case 'U':
+            strlcpy(global->name.ups, optarg,
+                  sizeof(global->name.ups));
+            rarch_ctl(RARCH_CTL_SET_UPS_PREF, NULL);
+            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_UPS_PREF, NULL);
+            break;
+
+         case RA_OPT_IPS:
+            strlcpy(global->name.ips, optarg,
+                  sizeof(global->name.ips));
+            rarch_ctl(RARCH_CTL_SET_IPS_PREF, NULL);
+            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_IPS_PREF, NULL);
+            break;
+
+         case RA_OPT_NO_PATCH:
+            rarch_ctl(RARCH_CTL_SET_PATCH_BLOCKED, NULL);
+            break;
+
+         case 'D':
+            frontend_driver_detach_console();
+            break;
+
+         case RA_OPT_MENU:
+            explicit_menu = true;
+            break;
+
+         case RA_OPT_NICK:
+            rarch_ctl(RARCH_CTL_USERNAME_SET, NULL);
+            strlcpy(settings->username, optarg,
+                  sizeof(settings->username));
+            break;
+
          case RA_OPT_APPENDCONFIG:
-            strlcpy(global->path.append_config, optarg,
-                  sizeof(global->path.append_config));
+            path_set(RARCH_PATH_CONFIG_APPEND, optarg);
             break;
 
          case RA_OPT_SIZE:
-         {
-            if (sscanf(optarg, "%ux%u", &global->record.width,
-                     &global->record.height) != 2)
+            if (sscanf(optarg, "%ux%u",
+                     recording_driver_get_width(),
+                     recording_driver_get_height()) != 2)
             {
                RARCH_ERR("Wrong format for --size.\n");
                retroarch_print_help(argv[0]);
                retroarch_fail(1, "retroarch_parse_input()");
             }
             break;
-         }
 
          case RA_OPT_RECORDCONFIG:
             strlcpy(global->record.config, optarg,
@@ -1043,7 +809,7 @@ static void retroarch_parse_input(int argc, char *argv[])
             break;
 
          case RA_OPT_SUBSYSTEM:
-            strlcpy(global->subsystem, optarg, sizeof(global->subsystem));
+            path_set(RARCH_PATH_SUBSYSTEM, optarg);
             break;
 
          case RA_OPT_FEATURES:
@@ -1084,136 +850,39 @@ static void retroarch_parse_input(int argc, char *argv[])
 #ifdef HAVE_DYNAMIC
       else
       {
-         /* Allow stray -L arguments to go through to workaround cases where it's used as "config file".
-          * This seems to still be the case for Android, which should be properly fixed. */
+         /* Allow stray -L arguments to go through to workaround cases 
+          * where it's used as "config file".
+          *
+          * This seems to still be the case for Android, which 
+          * should be properly fixed. */
          retroarch_set_current_core_type(CORE_TYPE_DUMMY, false);
       }
 #endif
    }
 
-   if (string_is_empty(global->subsystem) && optind < argc)
+   if (path_is_empty(RARCH_PATH_SUBSYSTEM) && optind < argc)
    {
       /* We requested explicit ROM, so use PLAIN core type. */
       retroarch_set_current_core_type(CORE_TYPE_PLAIN, false);
-      retroarch_set_pathnames((const char*)argv[optind]);
+      path_set(RARCH_PATH_NAMES, (const char*)argv[optind]);
    }
-   else if (!string_is_empty(global->subsystem) && optind < argc)
+   else if (!path_is_empty(RARCH_PATH_SUBSYSTEM) && optind < argc)
    {
       /* We requested explicit ROM, so use PLAIN core type. */
       retroarch_set_current_core_type(CORE_TYPE_PLAIN, false);
-      retroarch_set_special_paths(argv + optind, argc - optind);
+      path_set_special(argv + optind, argc - optind);
    }
    else
       content_set_does_not_need_content();
 
    /* Copy SRM/state dirs used, so they can be reused on reentrancy. */
-   if (retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_SAVE_PATH) &&
+   if (retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_SAVE_PATH, NULL) &&
          path_is_directory(global->name.savefile))
-      strlcpy(global->dir.savefile, global->name.savefile,
-            sizeof(global->dir.savefile));
+      dir_set(RARCH_DIR_SAVEFILE, global->name.savefile);
 
-   if (retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_STATE_PATH) &&
+   if (retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_STATE_PATH, NULL) &&
          path_is_directory(global->name.savestate))
-      strlcpy(global->dir.savestate, global->name.savestate,
-            sizeof(global->dir.savestate));
-}
-
-static void retroarch_init_savefile_paths(void)
-{
-   global_t            *global = global_get_ptr();
-   rarch_system_info_t *system = NULL;
-
-   runloop_ctl(RUNLOOP_CTL_SYSTEM_INFO_GET, &system);
-
-   command_event(CMD_EVENT_SAVEFILES_DEINIT, NULL);
-
-   global->savefiles = string_list_new();
-   retro_assert(global->savefiles);
-
-   if (system && !string_is_empty(global->subsystem))
-   {
-      /* For subsystems, we know exactly which RAM types are supported. */
-
-      unsigned i, j;
-      const struct retro_subsystem_info *info =
-         libretro_find_subsystem_info(
-               system->subsystem.data,
-               system->subsystem.size,
-               global->subsystem);
-
-      /* We'll handle this error gracefully later. */
-      unsigned num_content = MIN(info ? info->num_roms : 0,
-            global->subsystem_fullpaths ?
-            global->subsystem_fullpaths->size : 0);
-
-      bool use_sram_dir = path_is_directory(global->dir.savefile);
-
-      for (i = 0; i < num_content; i++)
-      {
-         for (j = 0; j < info->roms[i].num_memory; j++)
-         {
-            union string_list_elem_attr attr;
-            char path[PATH_MAX_LENGTH] = {0};
-            char ext[32] = {0};
-            const struct retro_subsystem_memory_info *mem =
-               (const struct retro_subsystem_memory_info*)
-               &info->roms[i].memory[j];
-
-            snprintf(ext, sizeof(ext), ".%s", mem->extension);
-
-            if (use_sram_dir)
-            {
-               /* Redirect content fullpath to save directory. */
-               strlcpy(path, global->dir.savefile, sizeof(path));
-               fill_pathname_dir(path,
-                     global->subsystem_fullpaths->elems[i].data, ext,
-                     sizeof(path));
-            }
-            else
-            {
-               fill_pathname(path, global->subsystem_fullpaths->elems[i].data,
-                     ext, sizeof(path));
-            }
-
-            attr.i = mem->type;
-            string_list_append(global->savefiles, path, attr);
-         }
-      }
-
-      /* Let other relevant paths be inferred from the main SRAM location. */
-      if (!retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_SAVE_PATH))
-         fill_pathname_noext(global->name.savefile,
-               global->name.base,
-               file_path_str(FILE_PATH_SRM_EXTENSION),
-               sizeof(global->name.savefile));
-
-      if (path_is_directory(global->name.savefile))
-      {
-         fill_pathname_dir(global->name.savefile,
-               global->name.base,
-               file_path_str(FILE_PATH_SRM_EXTENSION),
-               sizeof(global->name.savefile));
-         RARCH_LOG("%s \"%s\".\n",
-               msg_hash_to_str(MSG_REDIRECTING_SAVEFILE_TO),
-               global->name.savefile);
-      }
-   }
-   else
-   {
-      union string_list_elem_attr attr;
-      char savefile_name_rtc[PATH_MAX_LENGTH] = {0};
-
-      attr.i = RETRO_MEMORY_SAVE_RAM;
-      string_list_append(global->savefiles, global->name.savefile, attr);
-
-      /* Infer .rtc save path from save ram path. */
-      attr.i = RETRO_MEMORY_RTC;
-      fill_pathname(savefile_name_rtc,
-            global->name.savefile,
-            file_path_str(FILE_PATH_RTC_EXTENSION),
-            sizeof(savefile_name_rtc));
-      string_list_append(global->savefiles, savefile_name_rtc, attr);
-   }
+      dir_set(RARCH_DIR_SAVESTATE, global->name.savestate);
 }
 
 static bool retroarch_init_state(void)
@@ -1228,22 +897,23 @@ static bool retroarch_init_state(void)
 
 bool retroarch_validate_game_options(char *s, size_t len, bool mkdir)
 {
-   char core_path[PATH_MAX_LENGTH]        = {0};
-   char config_directory[PATH_MAX_LENGTH] = {0};
+   char core_path[PATH_MAX_LENGTH];
+   char config_directory[PATH_MAX_LENGTH];
    const char *core_name                  = NULL;
    const char *game_name                  = NULL;
    rarch_system_info_t *system            = NULL;
-   global_t *global                       = global_get_ptr();
 
    runloop_ctl(RUNLOOP_CTL_SYSTEM_INFO_GET, &system);
 
    if (system)
       core_name = system->info.library_name;
-   if (global)
-      game_name = path_basename(global->name.base);
+
+   game_name = path_basename(path_get(RARCH_PATH_BASENAME));
 
    if (string_is_empty(core_name) || string_is_empty(game_name))
       return false;
+
+   config_directory[0] = core_path[0] = '\0';
 
    fill_pathname_application_special(config_directory, sizeof(config_directory),
          APPLICATION_SPECIAL_DIRECTORY_CONFIG);
@@ -1262,11 +932,6 @@ bool retroarch_validate_game_options(char *s, size_t len, bool mkdir)
 
    return true;
 }
-
-#define FAIL_CPU(simd_type) do { \
-   RARCH_ERR(simd_type " code is compiled in, but CPU does not support this feature. Cannot continue.\n"); \
-   retroarch_fail(1, "validate_cpu_features()"); \
-} while(0)
 
 /* Validates CPU features for given processor architecture.
  * Make sure we haven't compiled for something we cannot run.
@@ -1293,8 +958,8 @@ static void retroarch_validate_cpu_features(void)
 
 static void retroarch_main_init_media(void)
 {
-   char    *fullpath    = NULL;
-   settings_t *settings = config_get_ptr();
+   settings_t *settings    = config_get_ptr();
+   const char    *fullpath = path_get(RARCH_PATH_CONTENT);
 
    if (!settings)
       return;
@@ -1304,20 +969,17 @@ static void retroarch_main_init_media(void)
       )
       return;
 
-   if (!runloop_ctl(RUNLOOP_CTL_GET_CONTENT_PATH, &fullpath))
-      return;
-
    if (string_is_empty(fullpath))
       return;
 
-   switch (retroarch_path_is_media_type(fullpath))
+   switch (path_is_media_type(fullpath))
    {
       case RARCH_CONTENT_MOVIE:
       case RARCH_CONTENT_MUSIC:
          if (settings->multimedia.builtin_mediaplayer_enable)
          {
 #ifdef HAVE_FFMPEG
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO);
+            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO, NULL);
             retroarch_set_current_core_type(CORE_TYPE_FFMPEG, false);
 #endif
          }
@@ -1326,7 +988,7 @@ static void retroarch_main_init_media(void)
       case RARCH_CONTENT_IMAGE:
          if (settings->multimedia.builtin_imageviewer_enable)
          {
-            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO);
+            retroarch_override_setting_set(RARCH_OVERRIDE_SETTING_LIBRETRO, NULL);
             retroarch_set_current_core_type(CORE_TYPE_IMAGEVIEWER, false);
          }
          break;
@@ -1364,11 +1026,13 @@ bool retroarch_main_init(int argc, char *argv[])
 
    if (verbosity_is_enabled())
    {
-      char str[PATH_MAX_LENGTH] = {0};
+      char str[255];
+
+      str[0] = '\0';
 
       RARCH_LOG_OUTPUT("=== Build =======================================\n");
       retroarch_get_capabilities(RARCH_CAPABILITIES_CPU, str, sizeof(str));
-      fprintf(stderr, "Capabilities: %s\n", str);
+      fprintf(stderr, "%s: %s\n", msg_hash_to_str(MSG_CAPABILITIES), str);
       fprintf(stderr, "Built: %s\n", __DATE__);
       RARCH_LOG_OUTPUT("Version: %s\n", PACKAGE_VERSION);
 #ifdef HAVE_GIT_VERSION
@@ -1387,9 +1051,9 @@ bool retroarch_main_init(int argc, char *argv[])
    driver_ctl(RARCH_DRIVER_CTL_INIT_PRE, NULL);
 
    /* Attempt to initialize core */
-   if (current_core_explicitly_set)
+   if (has_set_core)
    {
-      current_core_explicitly_set = false;
+      has_set_core = false;
       if (!command_event(CMD_EVENT_CORE_INIT, &explicit_current_core_type))
          init_failed = true;
    }
@@ -1423,7 +1087,9 @@ bool retroarch_main_init(int argc, char *argv[])
    command_event(CMD_EVENT_CONTROLLERS_INIT, NULL);
    command_event(CMD_EVENT_RECORD_INIT, NULL);
    command_event(CMD_EVENT_CHEATS_INIT, NULL);
-   command_event(CMD_EVENT_SAVEFILES_INIT, NULL);
+
+   path_init_savefile();
+
    command_event(CMD_EVENT_SET_PER_GAME_RESOLUTION, NULL);
 
    rarch_ctl(RARCH_CTL_UNSET_ERROR_ON_INIT, NULL);
@@ -1440,15 +1106,53 @@ error:
 
 bool rarch_ctl(enum rarch_ctl_state state, void *data)
 {
-   static bool has_set_username            = false;
-   static bool rarch_is_inited             = false;
-   static bool rarch_error_on_init         = false;
-   static bool rarch_block_config_read     = false;
-   static bool rarch_force_fullscreen      = false;
+   static bool rarch_is_sram_load_disabled = false;
+   static bool rarch_is_sram_save_disabled = false;
+   static bool rarch_use_sram              = false;
+   static bool rarch_ups_pref              = false;
+   static bool rarch_bps_pref              = false;
+   static bool rarch_ips_pref              = false;
+   static bool rarch_patch_blocked         = false;
    settings_t *settings                    = config_get_ptr();
+#ifdef HAVE_THREAD_STORAGE
+   static sthread_tls_t rarch_tls;
+   const void *MAGIC_POINTER = (void*)0xB16B00B5;
+#endif
 
    switch(state)
    {
+      case RARCH_CTL_IS_PATCH_BLOCKED:
+         return rarch_patch_blocked;
+      case RARCH_CTL_SET_PATCH_BLOCKED:
+         rarch_patch_blocked = true;
+         break;
+      case RARCH_CTL_UNSET_PATCH_BLOCKED:
+         rarch_patch_blocked = false;
+         break;
+      case RARCH_CTL_IS_BPS_PREF:
+         return rarch_bps_pref;
+      case RARCH_CTL_SET_BPS_PREF:
+         rarch_bps_pref = true;
+         break;
+      case RARCH_CTL_UNSET_BPS_PREF:
+         rarch_bps_pref = false;
+         break;
+      case RARCH_CTL_IS_UPS_PREF:
+         return rarch_ups_pref;
+      case RARCH_CTL_SET_UPS_PREF:
+         rarch_ups_pref = true;
+         break;
+      case RARCH_CTL_UNSET_UPS_PREF:
+         rarch_ups_pref = false;
+         break;
+      case RARCH_CTL_IS_IPS_PREF:
+         return rarch_ips_pref;
+      case RARCH_CTL_SET_IPS_PREF:
+         rarch_ips_pref = true;
+         break;
+      case RARCH_CTL_UNSET_IPS_PREF:
+         rarch_ips_pref = false;
+         break;
       case RARCH_CTL_IS_PLAIN_CORE:
          return (current_core_type == CORE_TYPE_PLAIN);
       case RARCH_CTL_IS_DUMMY_CORE:
@@ -1509,7 +1213,8 @@ bool rarch_ctl(enum rarch_ctl_state state, void *data)
          command_event(CMD_EVENT_AUTOSAVE_DEINIT, NULL);
 
          command_event(CMD_EVENT_RECORD_DEINIT, NULL);
-         command_event(CMD_EVENT_SAVEFILES, NULL);
+
+         event_save_files();
 
          command_event(CMD_EVENT_REWIND_DEINIT, NULL);
          command_event(CMD_EVENT_CHEATS_DEINIT, NULL);
@@ -1518,13 +1223,22 @@ bool rarch_ctl(enum rarch_ctl_state state, void *data)
          command_event(CMD_EVENT_CORE_DEINIT, NULL);
 
          command_event(CMD_EVENT_TEMPORARY_CONTENT_DEINIT, NULL);
-         command_event(CMD_EVENT_SUBSYSTEM_FULLPATHS_DEINIT, NULL);
-         command_event(CMD_EVENT_SAVEFILES_DEINIT, NULL);
+
+         path_deinit_subsystem();
+         path_deinit_savefile();
 
          rarch_ctl(RARCH_CTL_UNSET_INITED, NULL);
+
+#ifdef HAVE_THREAD_STORAGE
+         sthread_tls_delete(&rarch_tls);
+#endif
          break;
       case RARCH_CTL_INIT:
          rarch_ctl(RARCH_CTL_DEINIT, NULL);
+#ifdef HAVE_THREAD_STORAGE
+         sthread_tls_create(&rarch_tls);
+         sthread_tls_set(&rarch_tls, MAGIC_POINTER);
+#endif
          retroarch_init_state();
          {
             unsigned i;
@@ -1537,16 +1251,35 @@ bool rarch_ctl(enum rarch_ctl_state state, void *data)
       case RARCH_CTL_SET_PATHS_REDIRECT:
          if (content_does_not_need_content())
             return false;
-         retroarch_set_paths_redirect();
+         path_set_redirect();
          break;
+      case RARCH_CTL_IS_SRAM_LOAD_DISABLED:
+         return rarch_is_sram_load_disabled;
+      case RARCH_CTL_SET_SRAM_LOAD_DISABLED:
+         rarch_is_sram_load_disabled = true;
+         break;
+      case RARCH_CTL_UNSET_SRAM_LOAD_DISABLED:
+         rarch_is_sram_load_disabled = false;
+         break;
+      case RARCH_CTL_IS_SRAM_SAVE_DISABLED:
+         return rarch_is_sram_save_disabled;
+      case RARCH_CTL_SET_SRAM_SAVE_DISABLED:
+         rarch_is_sram_save_disabled = true;
+         break;
+      case RARCH_CTL_UNSET_SRAM_SAVE_DISABLED:
+         rarch_is_sram_save_disabled = false;
+         break;
+      case RARCH_CTL_IS_SRAM_USED:
+         return rarch_use_sram;
       case RARCH_CTL_SET_SRAM_ENABLE:
-         {
-            global_t *global                        = global_get_ptr();
-
-            if (global)
-               global->sram.use = rarch_ctl(RARCH_CTL_IS_PLAIN_CORE, NULL)
-                  && !content_does_not_need_content();
-         }
+         rarch_use_sram = rarch_ctl(RARCH_CTL_IS_PLAIN_CORE, NULL)
+            && !content_does_not_need_content();
+         break;
+      case RARCH_CTL_SET_SRAM_ENABLE_FORCE:
+         rarch_use_sram = true;
+         break;
+      case RARCH_CTL_UNSET_SRAM_ENABLE:
+         rarch_use_sram = false;
          break;
       case RARCH_CTL_SET_ERROR_ON_INIT:
          rarch_error_on_init = true;
@@ -1591,6 +1324,12 @@ bool rarch_ctl(enum rarch_ctl_state state, void *data)
             command_event(CMD_EVENT_OVERLAY_INIT, NULL);
 #endif
          break;
+      case RARCH_CTL_IS_MAIN_THREAD:
+#ifdef HAVE_THREAD_STORAGE
+         return sthread_tls_get(&rarch_tls) == MAGIC_POINTER;
+#else
+         return true;
+#endif
       case RARCH_CTL_NONE:
       default:
          return false;
@@ -1599,70 +1338,21 @@ bool rarch_ctl(enum rarch_ctl_state state, void *data)
    return true;
 }
 
-void retroarch_set_pathnames(const char *path)
-{
-   global_t *global = global_get_ptr();
 
-   retroarch_set_basename(path);
-
-   if (!retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_SAVE_PATH))
-      fill_pathname_noext(global->name.savefile, global->name.base,
-            file_path_str(FILE_PATH_SRM_EXTENSION), sizeof(global->name.savefile));
-
-   if (!retroarch_override_setting_is_set(RARCH_OVERRIDE_SETTING_STATE_PATH))
-      fill_pathname_noext(global->name.savestate, global->name.base,
-            file_path_str(FILE_PATH_STATE_EXTENSION), sizeof(global->name.savestate));
-
-   fill_pathname_noext(global->name.cheatfile, global->name.base,
-         file_path_str(FILE_PATH_CHT_EXTENSION), sizeof(global->name.cheatfile));
-
-   retroarch_set_paths_redirect();
-}
-
-void retroarch_fill_pathnames(void)
-{
-   global_t *global = global_get_ptr();
-
-   retroarch_init_savefile_paths();
-   bsv_movie_set_path(global->name.savefile);
-
-   if (string_is_empty(global->name.base))
-      return;
-
-   if (string_is_empty(global->name.ups))
-      fill_pathname_noext(global->name.ups, global->name.base,
-            file_path_str(FILE_PATH_UPS_EXTENSION),
-            sizeof(global->name.ups));
-
-   if (string_is_empty(global->name.bps))
-      fill_pathname_noext(global->name.bps, global->name.base,
-            file_path_str(FILE_PATH_BPS_EXTENSION),
-            sizeof(global->name.bps));
-
-   if (string_is_empty(global->name.ips))
-      fill_pathname_noext(global->name.ips, global->name.base,
-            file_path_str(FILE_PATH_IPS_EXTENSION),
-            sizeof(global->name.ips));
-}
-
-static bool has_set_verbosity           = false;
-static bool has_set_libretro            = false;
-static bool has_set_libretro_directory  = false;
-static bool has_set_save_path           = false;
-static bool has_set_state_path          = false;
-static bool has_set_netplay_mode        = false;
-static bool has_set_netplay_ip_address  = false;
-static bool has_set_netplay_ip_port     = false;
-static bool has_set_netplay_delay_frames= false;
-static bool has_set_netplay_check_frames= false;
-static bool has_set_ups_pref            = false;
-static bool has_set_bps_pref            = false;
-static bool has_set_ips_pref            = false;
-
-bool retroarch_override_setting_is_set(enum rarch_override_setting enum_idx)
+bool retroarch_override_setting_is_set(enum rarch_override_setting enum_idx, void *data)
 {
    switch (enum_idx)
    {
+      case RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE:
+         {
+            unsigned *val = (unsigned*)data;
+            if (val)
+            {
+               unsigned bit = *val;
+               return BIT128_GET(has_set_libretro_device, bit);
+            }
+         }
+         break;
       case RARCH_OVERRIDE_SETTING_VERBOSITY:
          return has_set_verbosity;
       case RARCH_OVERRIDE_SETTING_LIBRETRO:
@@ -1698,10 +1388,20 @@ bool retroarch_override_setting_is_set(enum rarch_override_setting enum_idx)
    return false;
 }
 
-void retroarch_override_setting_set(enum rarch_override_setting enum_idx)
+void retroarch_override_setting_set(enum rarch_override_setting enum_idx, void *data)
 {
    switch (enum_idx)
    {
+      case RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE:
+         {
+            unsigned *val = (unsigned*)data;
+            if (val)
+            {
+               unsigned bit = *val;
+               BIT128_SET(has_set_libretro_device, bit);
+            }
+         }
+         break;
       case RARCH_OVERRIDE_SETTING_VERBOSITY:
          has_set_verbosity = true;
          break;
@@ -1747,10 +1447,20 @@ void retroarch_override_setting_set(enum rarch_override_setting enum_idx)
    }
 }
 
-void retroarch_override_setting_unset(enum rarch_override_setting enum_idx)
+void retroarch_override_setting_unset(enum rarch_override_setting enum_idx, void *data)
 {
    switch (enum_idx)
    {
+      case RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE:
+         {
+            unsigned *val = (unsigned*)data;
+            if (val)
+            {
+               unsigned bit = *val;
+               BIT128_CLEAR(has_set_libretro_device, bit);
+            }
+         }
+         break;
       case RARCH_OVERRIDE_SETTING_VERBOSITY:
          has_set_verbosity = false;
          break;
@@ -1800,7 +1510,16 @@ void retroarch_override_setting_free_state(void)
 {
    unsigned i;
    for (i = 0; i < RARCH_OVERRIDE_SETTING_LAST; i++)
-      retroarch_override_setting_unset((enum rarch_override_setting)(i));
+   {
+      if (i == RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE)
+      {
+         unsigned j;
+         for (j = 0; j < MAX_USERS; j++)
+            retroarch_override_setting_unset((enum rarch_override_setting)(i), &j);
+      }
+      else
+         retroarch_override_setting_unset((enum rarch_override_setting)(i), NULL);
+   }
 }
 
 int retroarch_get_capabilities(enum rarch_capabilities type,
@@ -1848,28 +1567,37 @@ int retroarch_get_capabilities(enum rarch_capabilities type,
                strlcat(s, "VMX ", len);
             if (cpu & RETRO_SIMD_VMX128)
                strlcat(s, "VMX128 ", len);
+            if (cpu & RETRO_SIMD_ASIMD)
+               strlcat(s, "ASIMD ", len);
          }
          break;
       case RARCH_CAPABILITIES_COMPILER:
 #if defined(_MSC_VER)
-         snprintf(s, len, "Compiler: MSVC (%d) %u-bit", _MSC_VER, (unsigned)
+         snprintf(s, len, "%s: MSVC (%d) %u-bit",
+               msg_hash_to_str(MSG_COMPILER),
+               _MSC_VER, (unsigned)
                (CHAR_BIT * sizeof(size_t)));
 #elif defined(__SNC__)
-         snprintf(s, len, "Compiler: SNC (%d) %u-bit",
+         snprintf(s, len, "%s: SNC (%d) %u-bit",
+               msg_hash_to_str(MSG_COMPILER),
                __SN_VER__, (unsigned)(CHAR_BIT * sizeof(size_t)));
 #elif defined(_WIN32) && defined(__GNUC__)
-         snprintf(s, len, "Compiler: MinGW (%d.%d.%d) %u-bit",
+         snprintf(s, len, "%s: MinGW (%d.%d.%d) %u-bit",
+               msg_hash_to_str(MSG_COMPILER),
                __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__, (unsigned)
                (CHAR_BIT * sizeof(size_t)));
 #elif defined(__clang__)
-         snprintf(s, len, "Compiler: Clang/LLVM (%s) %u-bit",
+         snprintf(s, len, "%s: Clang/LLVM (%s) %u-bit",
+               msg_hash_to_str(MSG_COMPILER),
                __clang_version__, (unsigned)(CHAR_BIT * sizeof(size_t)));
 #elif defined(__GNUC__)
-         snprintf(s, len, "Compiler: GCC (%d.%d.%d) %u-bit",
+         snprintf(s, len, "%s: GCC (%d.%d.%d) %u-bit",
+               msg_hash_to_str(MSG_COMPILER),
                __GNUC__, __GNUC_MINOR__, __GNUC_PATCHLEVEL__, (unsigned)
                (CHAR_BIT * sizeof(size_t)));
 #else
-         snprintf(s, len, "Unknown compiler %u-bit",
+         snprintf(s, len, "%s %u-bit",
+               msg_hash_to_str(MSG_UNKNOWN_COMPILER),
                (unsigned)(CHAR_BIT * sizeof(size_t)));
 #endif
          break;
@@ -1883,13 +1611,13 @@ int retroarch_get_capabilities(enum rarch_capabilities type,
 
 void retroarch_set_current_core_type(enum rarch_core_type type, bool explicitly_set)
 {
-   if (explicitly_set && !current_core_explicitly_set)
+   if (explicitly_set && !has_set_core)
    {
-      current_core_explicitly_set = true;
+      has_set_core                = true;
       explicit_current_core_type  = type;
       current_core_type           = type;
    }
-   else if (!current_core_explicitly_set)
+   else if (!has_set_core)
       current_core_type          = type;
 }
 

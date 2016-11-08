@@ -35,10 +35,36 @@
 #define MAX_SPECTATORS 16
 #define RARCH_DEFAULT_PORT 55435
 
-#define NETPLAY_PROTOCOL_VERSION 1
+#define NETPLAY_PROTOCOL_VERSION 2
 
 #define PREV_PTR(x) ((x) == 0 ? netplay->buffer_size - 1 : (x) - 1)
 #define NEXT_PTR(x) ((x + 1) % netplay->buffer_size)
+
+/* Quirks mandated by how particular cores save states. This is distilled from
+ * the larger set of quirks that the quirks environment can communicate. */
+#define NETPLAY_QUIRK_NO_SAVESTATES (1<<0)
+#define NETPLAY_QUIRK_NO_TRANSMISSION (1<<1)
+#define NETPLAY_QUIRK_INITIALIZATION (1<<2)
+#define NETPLAY_QUIRK_ENDIAN_DEPENDENT (1<<3)
+#define NETPLAY_QUIRK_PLATFORM_DEPENDENT (1<<4)
+
+/* Mapping of serialization quirks to netplay quirks. */
+#define NETPLAY_QUIRK_MAP_UNDERSTOOD \
+   (RETRO_SERIALIZATION_QUIRK_INCOMPLETE \
+   |RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE \
+   |RETRO_SERIALIZATION_QUIRK_SINGLE_SESSION \
+   |RETRO_SERIALIZATION_QUIRK_ENDIAN_DEPENDENT \
+   |RETRO_SERIALIZATION_QUIRK_PLATFORM_DEPENDENT)
+#define NETPLAY_QUIRK_MAP_NO_SAVESTATES \
+   (RETRO_SERIALIZATION_QUIRK_INCOMPLETE)
+#define NETPLAY_QUIRK_MAP_NO_TRANSMISSION \
+   (RETRO_SERIALIZATION_QUIRK_SINGLE_SESSION)
+#define NETPLAY_QUIRK_MAP_INITIALIZATION \
+   (RETRO_SERIALIZATION_QUIRK_MUST_INITIALIZE)
+#define NETPLAY_QUIRK_MAP_ENDIAN_DEPENDENT \
+   (RETRO_SERIALIZATION_QUIRK_ENDIAN_DEPENDENT)
+#define NETPLAY_QUIRK_MAP_PLATFORM_DEPENDENT \
+   (RETRO_SERIALIZATION_QUIRK_PLATFORM_DEPENDENT)
 
 struct delta_frame
 {
@@ -74,7 +100,8 @@ struct netplay_callbacks {
 enum rarch_netplay_stall_reasons
 {
     RARCH_NETPLAY_STALL_NONE = 0,
-    RARCH_NETPLAY_STALL_RUNNING_FAST
+    RARCH_NETPLAY_STALL_RUNNING_FAST,
+    RARCH_NETPLAY_STALL_NO_CONNECTION
 };
 
 struct netplay
@@ -86,6 +113,8 @@ struct netplay
    struct retro_callbacks cbs;
    /* TCP connection for state sending, etc. Also used for commands */
    int fd;
+   /* TCP port (if serving) */
+   uint16_t tcp_port;
    /* Which port is governed by netplay (other user)? */
    unsigned port;
    bool has_connection;
@@ -114,6 +143,9 @@ struct netplay
    /* Force a rewind to other_frame_count/other_ptr. This is for synchronized
     * events, such as player flipping or savestate loading. */
    bool force_rewind;
+
+   /* Quirks in the savestate implementation */
+   uint64_t quirks;
 
    /* Force our state to be sent to the other side. Used when they request a
     * savestate, to send at the next pre-frame. */
@@ -167,11 +199,17 @@ struct netplay
    struct netplay_callbacks* net_cbs;
 };
 
-extern void *netplay_data;
-
 struct netplay_callbacks* netplay_get_cbs_net(void);
 
 struct netplay_callbacks* netplay_get_cbs_spectate(void);
+
+/* Normally called at init time, unless the INITIALIZATION quirk is set */
+bool netplay_init_serialization(netplay_t *netplay);
+
+/* Force serialization to be ready by fast-forwarding the core */
+bool netplay_wait_and_init_serialization(netplay_t *netplay);
+
+void netplay_simulate_input(netplay_t *netplay, uint32_t sim_ptr);
 
 void   netplay_log_connection(const struct sockaddr_storage *their_addr,
       unsigned slot, const char *nick);
@@ -180,17 +218,9 @@ bool netplay_get_nickname(netplay_t *netplay, int fd);
 
 bool netplay_send_nickname(netplay_t *netplay, int fd);
 
-bool netplay_send_info(netplay_t *netplay);
-
-uint32_t *netplay_bsv_header_generate(size_t *size, uint32_t magic);
-
-bool netplay_bsv_parse_header(const uint32_t *header, uint32_t magic);
+bool netplay_handshake(netplay_t *netplay);
 
 uint32_t netplay_impl_magic(void);
-
-bool netplay_send_info(netplay_t *netplay);
-
-bool netplay_get_info(netplay_t *netplay);
 
 bool netplay_is_server(netplay_t* netplay);
 
@@ -203,5 +233,7 @@ uint32_t netplay_delta_frame_crc(netplay_t *netplay, struct delta_frame *delta);
 bool netplay_cmd_crc(netplay_t *netplay, struct delta_frame *delta);
 
 bool netplay_cmd_request_savestate(netplay_t *netplay);
+
+bool netplay_ad_server(netplay_t *netplay, int ad_fd);
 
 #endif

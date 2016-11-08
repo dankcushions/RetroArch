@@ -141,7 +141,7 @@ typedef struct zarch_handle
    const core_info_t *pick_cores;
    size_t pick_supported;
 
-   void *fb_buf;
+   void *font;
    int font_size;
    int header_height;
    unsigned next_id;
@@ -269,7 +269,7 @@ static void zarch_zui_draw_text(zui_t *zui,
 {
    struct font_params params;
 
-   if (!zui || !zui->fb_buf || string_is_empty(text))
+   if (!zui || !zui->font || string_is_empty(text))
       return;
 
    /* need to use height-y because the font renderer 
@@ -284,7 +284,7 @@ static void zarch_zui_draw_text(zui_t *zui,
    params.full_screen = true;
    params.text_align  = TEXT_ALIGN_LEFT;
 
-   video_driver_set_osd_msg(text, &params, zui->fb_buf);
+   video_driver_set_osd_msg(text, &params, zui->font);
 }
 
 static bool zarch_zui_button_full(zui_t *zui,
@@ -305,10 +305,10 @@ static bool zarch_zui_button_full(zui_t *zui,
 
 static bool zarch_zui_button(zui_t *zui, int x1, int y1, const char *label)
 {
-   if (!zui || !zui->fb_buf)
+   if (!zui || !zui->font)
       return false;
    return zarch_zui_button_full(zui, x1, y1, x1 
-         + zarch_zui_strwidth(zui->fb_buf, label, 1.0) + 24, y1 + 64, label);
+         + zarch_zui_strwidth(zui->font, label, 1.0) + 24, y1 + 64, label);
 }
 
 static bool zarch_zui_list_item(zui_t *zui, struct zui_tabbed *tab, int x1, int y1,
@@ -316,7 +316,7 @@ static bool zarch_zui_list_item(zui_t *zui, struct zui_tabbed *tab, int x1, int 
 {
    menu_animation_ctx_ticker_t ticker;
    unsigned ticker_size;
-   char title_buf[PATH_MAX_LENGTH] = {0};
+   char title_buf[PATH_MAX_LENGTH];
    uint64_t *frame_count = NULL;
    unsigned           id = zarch_zui_hash(zui, label);
    int                x2 = x1 + zui->width - 290 - 40;
@@ -324,6 +324,8 @@ static bool zarch_zui_list_item(zui_t *zui, struct zui_tabbed *tab, int x1, int 
    bool           active = zarch_zui_check_button_up(zui, id, x1, y1, x2, y2);
    const float       *bg = zui_bg_panel;
    frame_count           = video_driver_get_frame_count_ptr();
+
+   title_buf[0] = '\0';
 
    if (tab->active_id != tab->prev_id)
       tab->prev_id         = tab->active_id;
@@ -378,9 +380,9 @@ static bool zarch_zui_tab(zui_t *zui, struct zui_tabbed *tab,
 
    if (!width)
    {
-      if (!zui->fb_buf)
+      if (!zui->font)
          return false;
-      width          = zarch_zui_strwidth(zui->fb_buf, label, 1.0) + 24;
+      width          = zarch_zui_strwidth(zui->font, label, 1.0) + 24;
    }
 
    x1                = tab->x;
@@ -512,9 +514,11 @@ static int zarch_zui_render_lay_root_recent(zui_t *zui, struct zui_tabbed *tabbe
 
       for (i = zui->recent_dlist_first; i < size; ++i)
       {
-         char rich_label[PATH_MAX_LENGTH]  = {0};
-         char entry_value[PATH_MAX_LENGTH] = {0};
+         char rich_label[PATH_MAX_LENGTH];
+         char entry_value[PATH_MAX_LENGTH];
          menu_entry_t entry                = {{0}};
+
+         rich_label[0] = entry_value[0]    = '\0';
 
          menu_entry_get(&entry, 0, i, NULL, true);
          menu_entry_get_rich_label(i, rich_label, sizeof(rich_label));
@@ -562,9 +566,11 @@ static void zarch_zui_render_lay_root_load_set_new_path(zui_t *zui,
 static int zarch_zui_render_lay_root_load(zui_t *zui,
       struct zui_tabbed *tabbed)
 {
-   char parent_dir[PATH_MAX_LENGTH] = {0};
+   char parent_dir[PATH_MAX_LENGTH];
    settings_t           *settings   = config_get_ptr();
    core_info_list_t           *list = NULL;
+
+   parent_dir[0] = '\0';
 
    if (zarch_zui_tab(zui, tabbed, "Load", 1))
    {
@@ -626,14 +632,16 @@ static int zarch_zui_render_lay_root_load(zui_t *zui,
 
             for (i = skip + zui->load_dlist_first; i < size; ++i)
             {
-               char label[PATH_MAX_LENGTH] = {0};
+               char label[PATH_MAX_LENGTH];
                const char        *path     = NULL;
                const char        *basename = NULL;
 
                if (j > 10)
                   break;
 
-               path = zui->load_dlist->elems[i].data;
+               label[0] = '\0';
+
+               path     = zui->load_dlist->elems[i].data;
                basename = path_basename(path);
 
                *label = 0;
@@ -703,7 +711,7 @@ static int zarch_zui_render_lay_root_downloads(
 
 static int zarch_zui_render_lay_root(zui_t *zui)
 {
-   char item[PATH_MAX_LENGTH]      = {0};
+   char item[PATH_MAX_LENGTH];
    static struct zui_tabbed tabbed = {~0U};
 
    zarch_zui_tabbed_begin(zui, &tabbed, 0, 0);
@@ -720,8 +728,9 @@ static int zarch_zui_render_lay_root(zui_t *zui)
    if (zarch_zui_render_lay_root_downloads(zui, &tabbed))
       return 0;
 
-   (void)item;
 #ifdef ZARCH_DEBUG
+   item[0] = '\0';
+
    snprintf(item, sizeof(item), "item id: %d\n", zui->active_id);
    zarch_zui_draw_text(zui, ZUI_FG_NORMAL, 1600 +12, 300 + 41, item); 
    snprintf(item, sizeof(item), "tab  idx: %d\n", tabbed.active_id);
@@ -854,7 +863,6 @@ static void zarch_frame(void *data)
    video_driver_get_size(&zui->width, &zui->height);
 
    menu_display_set_viewport();
-   zui->fb_buf = menu_display_get_font_buffer();
 
    for (i = 0; i < 16; i++)
    {
@@ -880,7 +888,7 @@ static void zarch_frame(void *data)
 
    zui->tmp_block.carr.coords.vertices = 0;
 
-   menu_display_font_bind_block(&zui->tmp_block);
+   menu_display_font_bind_block((font_data_t*)zui->font, &zui->tmp_block);
 
    menu_display_push_quad(zui->width, zui->height, zui_bg_screen,
          0, 0, zui->width, zui->height);
@@ -958,13 +966,12 @@ static void zarch_frame(void *data)
 
    zui->rendering = false;
 
-   menu_display_font_flush_block();
+   menu_display_font_flush_block((font_data_t*)zui->font);
    menu_display_unset_viewport();
 }
 
 static void *zarch_init(void **userdata)
 {
-   int unused;
    zui_t *zui                              = NULL;
    settings_t *settings                    = config_get_ptr();
    menu_handle_t *menu                     = (menu_handle_t*)
@@ -989,25 +996,10 @@ static void *zarch_init(void **userdata)
       settings->menu.mouse.enable = false;
    }
 
-   unused = 1000;
-   menu_display_set_header_height(unused);
-
-   unused = 28;
-   menu_display_set_font_size(unused);
-
-   (void)unused;
-
    zui->header_height  = 1000; /* dpi / 3; */
    zui->font_size       = 28;
 
-   if (!string_is_empty(settings->path.menu_wallpaper))
-      task_push_image_load(settings->path.menu_wallpaper,
-            MENU_ENUM_LABEL_CB_MENU_WALLPAPER,
-            menu_display_handle_wallpaper_upload, NULL);
-
    matrix_4x4_ortho(&zui->mvp, 0, 1, 1, 0, 0, 1);
-
-   menu_display_font(APPLICATION_SPECIAL_DIRECTORY_ASSETS_ZARCH_FONT);
 
    return menu;
 error:
@@ -1037,8 +1029,16 @@ static void zarch_context_bg_destroy(void *data)
 
 static void zarch_context_destroy(void *data)
 {
-   menu_display_font_main_deinit();
+   zui_t        *zui = (zui_t*)data;
+
+   /* why on earth is this called twice on exit? */
+   if (!zui)
+      return;
+
+   menu_display_font_free((font_data_t*)zui->font);
    zarch_context_bg_destroy(data);
+
+   zui->font = NULL;
 }
 
 static bool zarch_load_image(void *userdata, 
@@ -1068,21 +1068,11 @@ static bool zarch_load_image(void *userdata,
 
 static void zarch_context_reset(void *data)
 {
-   menu_display_ctx_font_t font_info;
    settings_t *settings  = config_get_ptr();
    zui_t          *zui   = (zui_t*)data;
 
    if (!zui || !settings)
       return;
-
-   font_info.path    = NULL;
-   font_info.size    = zui->font_size;
-
-   if (settings->video.font_enable)
-      font_info.path = settings->path.font;
-
-   if (!menu_display_font_main_init(&font_info))
-      RARCH_WARN("Failed to load font.");
 
    zarch_context_bg_destroy(zui);
 
@@ -1092,8 +1082,8 @@ static void zarch_context_reset(void *data)
 
    menu_display_allocate_white_texture();
 
-   menu_display_set_font_size(zui->font_size);
-   menu_display_font(APPLICATION_SPECIAL_DIRECTORY_ASSETS_ZARCH_FONT);
+   menu_display_set_header_height(zui->header_height);
+   zui->font = menu_display_font(APPLICATION_SPECIAL_DIRECTORY_ASSETS_ZARCH_FONT, zui->font_size);
 }
 
 static int zarch_iterate(void *data, void *userdata, enum menu_action action)

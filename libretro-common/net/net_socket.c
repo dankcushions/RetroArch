@@ -26,7 +26,7 @@
 
 int socket_init(void **address, uint16_t port, const char *server, enum socket_type type)
 {
-   char port_buf[16]     = {0};
+   char port_buf[16];
    struct addrinfo hints = {0};
    struct addrinfo **addrinfo = (struct addrinfo**)address;
    struct addrinfo *addr = NULL;
@@ -49,6 +49,8 @@ int socket_init(void **address, uint16_t port, const char *server, enum socket_t
 
    if (!server)
       hints.ai_flags = AI_PASSIVE;
+
+   port_buf[0] = '\0';
 
    snprintf(port_buf, sizeof(port_buf), "%hu", (unsigned short)port);
 
@@ -164,7 +166,7 @@ int socket_send_all_blocking(int fd, const void *data_, size_t size,
             no_signal ? MSG_NOSIGNAL : 0);
       if (ret <= 0)
       {
-         if (!isagain(ret))
+         if (isagain(ret))
             continue;
 
          return false;

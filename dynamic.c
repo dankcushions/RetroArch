@@ -51,6 +51,8 @@
 #include "cores/internal_cores.h"
 #include "frontend/frontend_driver.h"
 #include "content.h"
+#include "dirs.h"
+#include "paths.h"
 #include "retroarch.h"
 #include "runloop.h"
 #include "configuration.h"
@@ -79,7 +81,7 @@ static dylib_t lib_handle;
 #define SYMBOL_IMAGEVIEWER(x) current_core->x = libretro_imageviewer_##x
 #endif
 
-#if defined(HAVE_NETWORKGAMEPAD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORKGAMEPAD)
 #define SYMBOL_NETRETROPAD(x) current_core->x = libretro_netretropad_##x
 #endif
 
@@ -168,6 +170,87 @@ static bool environ_cb_get_system_info(unsigned cmd, void *data)
 }
 
 #ifdef HAVE_DYNAMIC
+/**
+ * libretro_get_environment_info:
+ * @func                         : Function pointer for get_environment_info.
+ * @load_no_content              : If true, core should be able to auto-start
+ *                                 without any content loaded.
+ *
+ * Sets environment callback in order to get statically known
+ * information from it.
+ *
+ * Fetched via environment callbacks instead of
+ * retro_get_system_info(), as this info is part of extensions.
+ *
+ * Should only be called once right after core load to
+ * avoid overwriting the "real" environ callback.
+ *
+ * For statically linked cores, pass retro_set_environment as argument.
+ */
+void libretro_get_environment_info(void (*func)(retro_environment_t),
+      bool *load_no_content)
+{
+   load_no_content_hook = load_no_content;
+
+   /* load_no_content gets set in this callback. */
+   func(environ_cb_get_system_info);
+
+   /* It's possible that we just set get_system_info callback 
+    * to the currently running core.
+    *
+    * Make sure we reset it to the actual environment callback.
+    * Ignore any environment callbacks here in case we're running 
+    * on the non-current core. */
+   ignore_environment_cb = true;
+   func(rarch_environment_cb);
+   ignore_environment_cb = false;
+}
+
+static bool load_dynamic_core(void)
+{
+   function_t sym       = dylib_proc(NULL, "retro_init");
+
+   if (sym)
+   {
+      /* Try to verify that -lretro was not linked in from other modules
+       * since loading it dynamically and with -l will fail hard. */
+      RARCH_ERR("Serious problem. RetroArch wants to load libretro cores"
+            "dyamically, but it is already linked.\n");
+      RARCH_ERR("This could happen if other modules RetroArch depends on "
+            "link against libretro directly.\n");
+      RARCH_ERR("Proceeding could cause a crash. Aborting ...\n");
+      retroarch_fail(1, "init_libretro_sym()");
+   }
+
+   if (string_is_empty(path_get(RARCH_PATH_CORE)))
+   {
+      RARCH_ERR("RetroArch is built for dynamic libretro cores, but "
+            "libretro_path is not set. Cannot continue.\n");
+      retroarch_fail(1, "init_libretro_sym()");
+   }
+
+   /* Need to use absolute path for this setting. It can be
+    * saved to content history, and a relative path would
+    * break in that scenario. */
+   path_resolve_realpath(
+         path_get_ptr(RARCH_PATH_CORE),
+         path_get_realsize(RARCH_PATH_CORE));
+
+   RARCH_LOG("Loading dynamic libretro core from: \"%s\"\n",
+         path_get(RARCH_PATH_CORE));
+   lib_handle = dylib_load(path_get(RARCH_PATH_CORE));
+   if (!lib_handle)
+   {
+      RARCH_ERR("Failed to open libretro core: \"%s\"\n",
+            path_get(RARCH_PATH_CORE));
+      RARCH_ERR("Error(s): %s\n", dylib_error());
+      runloop_msg_queue_push(msg_hash_to_str(MSG_FAILED_TO_OPEN_LIBRETRO_CORE), 1, 180, true);
+      return false;
+   }
+
+   return true;
+}
+
 static dylib_t libretro_get_system_info_lib(const char *path,
       struct retro_system_info *info, bool *load_no_content)
 {
@@ -279,87 +362,6 @@ bool libretro_get_system_info(const char *path,
    return true;
 }
 
-#ifdef HAVE_DYNAMIC
-/**
- * libretro_get_environment_info:
- * @func                         : Function pointer for get_environment_info.
- * @load_no_content              : If true, core should be able to auto-start
- *                                 without any content loaded.
- *
- * Sets environment callback in order to get statically known
- * information from it.
- *
- * Fetched via environment callbacks instead of
- * retro_get_system_info(), as this info is part of extensions.
- *
- * Should only be called once right after core load to
- * avoid overwriting the "real" environ callback.
- *
- * For statically linked cores, pass retro_set_environment as argument.
- */
-void libretro_get_environment_info(void (*func)(retro_environment_t),
-      bool *load_no_content)
-{
-   load_no_content_hook = load_no_content;
-
-   /* load_no_content gets set in this callback. */
-   func(environ_cb_get_system_info);
-
-   /* It's possible that we just set get_system_info callback 
-    * to the currently running core.
-    *
-    * Make sure we reset it to the actual environment callback.
-    * Ignore any environment callbacks here in case we're running 
-    * on the non-current core. */
-   ignore_environment_cb = true;
-   func(rarch_environment_cb);
-   ignore_environment_cb = false;
-}
-
-
-
-static void load_dynamic_core(void)
-{
-   function_t sym       = dylib_proc(NULL, "retro_init");
-
-   if (sym)
-   {
-      /* Try to verify that -lretro was not linked in from other modules
-       * since loading it dynamically and with -l will fail hard. */
-      RARCH_ERR("Serious problem. RetroArch wants to load libretro cores"
-            "dyamically, but it is already linked.\n");
-      RARCH_ERR("This could happen if other modules RetroArch depends on "
-            "link against libretro directly.\n");
-      RARCH_ERR("Proceeding could cause a crash. Aborting ...\n");
-      retroarch_fail(1, "init_libretro_sym()");
-   }
-
-   if (string_is_empty(config_get_active_core_path()))
-   {
-      RARCH_ERR("RetroArch is built for dynamic libretro cores, but "
-            "libretro_path is not set. Cannot continue.\n");
-      retroarch_fail(1, "init_libretro_sym()");
-   }
-
-   /* Need to use absolute path for this setting. It can be
-    * saved to content history, and a relative path would
-    * break in that scenario. */
-   path_resolve_realpath(
-         config_get_active_core_path_ptr(),
-         config_get_active_core_path_size());
-
-   RARCH_LOG("Loading dynamic libretro core from: \"%s\"\n",
-         config_get_active_core_path());
-   lib_handle = dylib_load(config_get_active_core_path());
-   if (!lib_handle)
-   {
-      RARCH_ERR("Failed to open libretro core: \"%s\"\n",
-            config_get_active_core_path());
-      RARCH_ERR("Error(s): %s\n", dylib_error());
-      retroarch_fail(1, "load_dynamic()");
-   }
-}
-#endif
 
 /**
  * load_symbols:
@@ -367,15 +369,17 @@ static void load_dynamic_core(void)
  *                                If CORE_TYPE_DUMMY, will
  *                                load dummy symbols.
  *
- * Setup libretro callback symbols.
+ * Setup libretro callback symbols. Returns true on success,
+ * or false if symbols could not be loaded.
  **/
-static void load_symbols(enum rarch_core_type type, struct retro_core_t *current_core)
+static bool load_symbols(enum rarch_core_type type, struct retro_core_t *current_core)
 {
    switch (type)
    {
       case CORE_TYPE_PLAIN:
 #ifdef HAVE_DYNAMIC
-         load_dynamic_core();
+         if (!load_dynamic_core())
+            return false;
 #endif
 
          SYMBOL(retro_init);
@@ -522,7 +526,7 @@ static void load_symbols(enum rarch_core_type type, struct retro_core_t *current
 #endif
          break;
       case CORE_TYPE_NETRETROPAD:
-#if defined(HAVE_NETWORKGAMEPAD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORKGAMEPAD)
          SYMBOL_NETRETROPAD(retro_init);
          SYMBOL_NETRETROPAD(retro_deinit);
 
@@ -596,6 +600,8 @@ static void load_symbols(enum rarch_core_type type, struct retro_core_t *current
 #endif
          break;
    }
+
+   return true;
 }
 
 /**
@@ -645,15 +651,19 @@ void libretro_get_current_core_pathname(char *name, size_t size)
  *                                load dummy symbols.
  *
  * Initializes libretro symbols and
- * setups environment callback functions.
+ * setups environment callback functions. Returns true on success,
+ * or false if symbols could not be loaded.
  **/
-void init_libretro_sym(enum rarch_core_type type, struct retro_core_t *current_core)
+bool init_libretro_sym(enum rarch_core_type type, struct retro_core_t *current_core)
 {
    /* Guarantee that we can do "dirty" casting.
     * Every OS that this program supports should pass this. */
    retro_assert(sizeof(void*) == sizeof(void (*)(void)));
 
-   load_symbols(type, current_core);
+   if (!load_symbols(type, current_core))
+      return false;
+
+   return true;
 }
 
 /**
@@ -941,7 +951,6 @@ bool rarch_environment_cb(unsigned cmd, void *data)
 {
    unsigned p;
    settings_t         *settings = config_get_ptr();
-   global_t         *global     = global_get_ptr();
    rarch_system_info_t *system  = NULL;
    
    runloop_ctl(RUNLOOP_CTL_SYSTEM_INFO_GET, &system);
@@ -1028,19 +1037,20 @@ bool rarch_environment_cb(unsigned cmd, void *data)
       case RETRO_ENVIRONMENT_GET_SYSTEM_DIRECTORY:
          if (string_is_empty(settings->directory.system))
          {
-            char *fullpath = NULL;
-            if (runloop_ctl(RUNLOOP_CTL_GET_CONTENT_PATH, &fullpath) &&
-                  fullpath)
+            const char *fullpath = path_get(RARCH_PATH_CONTENT);
+            if (!string_is_empty(fullpath))
             {
+               char temp_path[PATH_MAX_LENGTH] = {0};
+
                RARCH_WARN("SYSTEM DIR is empty, assume CONTENT DIR %s\n",
                      fullpath);
-               fill_pathname_basedir(global->dir.systemdir, fullpath,
-                     sizeof(global->dir.systemdir));
+               fill_pathname_basedir(temp_path, fullpath, sizeof(temp_path));
+               dir_set(RARCH_DIR_SYSTEM, temp_path);
             }
 
-            *(const char**)data = global->dir.systemdir;
+            *(const char**)data = dir_get_ptr(RARCH_DIR_SYSTEM);
             RARCH_LOG("Environ SYSTEM_DIRECTORY: \"%s\".\n",
-                  global->dir.systemdir);
+                  dir_get(RARCH_DIR_SYSTEM));
          }
          else
          {
@@ -1052,7 +1062,7 @@ bool rarch_environment_cb(unsigned cmd, void *data)
          break;
 
       case RETRO_ENVIRONMENT_GET_SAVE_DIRECTORY:
-         *(const char**)data = retroarch_get_current_savefile_dir();
+         *(const char**)data = dir_get(RARCH_DIR_CURRENT_SAVEFILE);
          break;
 
       case RETRO_ENVIRONMENT_GET_USERNAME:
@@ -1266,7 +1276,7 @@ bool rarch_environment_cb(unsigned cmd, void *data)
       {
          const char **path = (const char**)data;
 #ifdef HAVE_DYNAMIC
-         *path = config_get_active_core_path();
+         *path = path_get(RARCH_PATH_CORE);
 #else
          *path = NULL;
 #endif
@@ -1606,6 +1616,13 @@ bool rarch_environment_cb(unsigned cmd, void *data)
             (const struct retro_hw_render_context_negotiation_interface*)data;
          RARCH_LOG("Environ SET_HW_RENDER_CONTEXT_NEGOTIATION_INTERFACE.\n");
          video_driver_set_context_negotiation_interface(iface);
+         break;
+      }
+
+      case RETRO_ENVIRONMENT_SET_SERIALIZATION_QUIRKS:
+      {
+         uint64_t *quirks = (uint64_t *) data;
+         core_set_serialization_quirks(*quirks);
          break;
       }
 

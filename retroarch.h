@@ -59,7 +59,34 @@ enum rarch_ctl_state
 
    RARCH_CTL_SET_PATHS_REDIRECT,
 
+   RARCH_CTL_IS_BPS_PREF,
+   RARCH_CTL_SET_BPS_PREF,
+   RARCH_CTL_UNSET_BPS_PREF,
+
+   RARCH_CTL_IS_PATCH_BLOCKED,
+   RARCH_CTL_SET_PATCH_BLOCKED,
+   RARCH_CTL_UNSET_PATCH_BLOCKED,
+
+   RARCH_CTL_IS_UPS_PREF,
+   RARCH_CTL_SET_UPS_PREF,
+   RARCH_CTL_UNSET_UPS_PREF,
+
+   RARCH_CTL_IS_IPS_PREF,
+   RARCH_CTL_SET_IPS_PREF,
+   RARCH_CTL_UNSET_IPS_PREF,
+
+   RARCH_CTL_IS_SRAM_USED,
    RARCH_CTL_SET_SRAM_ENABLE,
+   RARCH_CTL_SET_SRAM_ENABLE_FORCE,
+   RARCH_CTL_UNSET_SRAM_ENABLE,
+
+   RARCH_CTL_IS_SRAM_LOAD_DISABLED,
+   RARCH_CTL_SET_SRAM_LOAD_DISABLED,
+   RARCH_CTL_UNSET_SRAM_LOAD_DISABLED,
+
+   RARCH_CTL_IS_SRAM_SAVE_DISABLED,
+   RARCH_CTL_SET_SRAM_SAVE_DISABLED,
+   RARCH_CTL_UNSET_SRAM_SAVE_DISABLED,
 
    /* Force fullscreen */
    RARCH_CTL_SET_FORCE_FULLSCREEN,
@@ -79,16 +106,9 @@ enum rarch_ctl_state
    /* Username */
    RARCH_CTL_HAS_SET_USERNAME,
    RARCH_CTL_USERNAME_SET,
-   RARCH_CTL_USERNAME_UNSET
+   RARCH_CTL_USERNAME_UNSET,
 
-};
-
-enum rarch_content_type
-{
-   RARCH_CONTENT_NONE = 0,
-   RARCH_CONTENT_MOVIE,
-   RARCH_CONTENT_MUSIC,
-   RARCH_CONTENT_IMAGE
+   RARCH_CTL_IS_MAIN_THREAD
 };
 
 enum rarch_capabilities
@@ -114,6 +134,7 @@ enum rarch_override_setting
    RARCH_OVERRIDE_SETTING_UPS_PREF,
    RARCH_OVERRIDE_SETTING_BPS_PREF,
    RARCH_OVERRIDE_SETTING_IPS_PREF,
+   RARCH_OVERRIDE_SETTING_LIBRETRO_DEVICE,
    RARCH_OVERRIDE_SETTING_LAST
 };
 
@@ -138,23 +159,15 @@ bool rarch_ctl(enum rarch_ctl_state state, void *data);
 int retroarch_get_capabilities(enum rarch_capabilities type,
       char *s, size_t len);
 
-void retroarch_override_setting_set(enum rarch_override_setting enum_idx);
+void retroarch_override_setting_set(enum rarch_override_setting enum_idx, void *data);
 
-void retroarch_override_setting_unset(enum rarch_override_setting enum_idx);
+void retroarch_override_setting_unset(enum rarch_override_setting enum_idx, void *data);
 
 void retroarch_override_setting_free_state(void);
 
-bool retroarch_override_setting_is_set(enum rarch_override_setting enum_idx);
-
-enum rarch_content_type retroarch_path_is_media_type(const char *path);
-
-const char *retroarch_get_current_savefile_dir(void);
+bool retroarch_override_setting_is_set(enum rarch_override_setting enum_idx, void *data);
 
 bool retroarch_validate_game_options(char *s, size_t len, bool mkdir);
-
-void retroarch_set_pathnames(const char *path);
-
-void retroarch_fill_pathnames(void);
 
 void retroarch_set_current_core_type(enum rarch_core_type type, bool explicitly_set);
 

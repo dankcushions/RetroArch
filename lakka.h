@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2014-2016 - Jean-André Santoni
  * 
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -21,5 +22,6 @@
 #define LAKKA_SAMBA_PATH     "/storage/.cache/services/samba.conf"
 #define LAKKA_BLUETOOTH_PATH "/storage/.cache/services/bluez.conf"
 #define LAKKA_UPDATE_DIR     "/storage/.update/"
+#define LAKKA_CONNMAN_DIR    "/storage/.cache/connman/"
 
 #endif

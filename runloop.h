@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  * 
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -24,7 +25,10 @@
 #include "config.h"
 #endif
 
-#include "input/input_defines.h"
+#define runloop_cmd_triggered(trigger_input, id) (BIT64_GET(trigger_input, id))
+
+#define runloop_cmd_press(current_input, id)     (BIT64_GET(current_input, id))
+#define runloop_cmd_pressed(old_input, id)       (BIT64_GET(old_input, id))
 
 RETRO_BEGIN_DECLS
 
@@ -33,15 +37,11 @@ enum runloop_ctl_state
    RUNLOOP_CTL_NONE = 0,
 
    RUNLOOP_CTL_SET_FRAME_LIMIT,
-   RUNLOOP_CTL_UNSET_FRAME_LIMIT,
-   RUNLOOP_CTL_SHOULD_SET_FRAME_LIMIT,
 
    RUNLOOP_CTL_TASK_INIT,
 
    RUNLOOP_CTL_FRAME_TIME_FREE,
    RUNLOOP_CTL_SET_FRAME_TIME_LAST,
-   RUNLOOP_CTL_UNSET_FRAME_TIME_LAST,
-   RUNLOOP_CTL_IS_FRAME_TIME_LAST,
    RUNLOOP_CTL_SET_FRAME_TIME,
 
    RUNLOOP_CTL_IS_IDLE,
@@ -62,14 +62,6 @@ enum runloop_ctl_state
    RUNLOOP_CTL_SET_NONBLOCK_FORCED,
    RUNLOOP_CTL_UNSET_NONBLOCK_FORCED,
 
-   RUNLOOP_CTL_GET_CONTENT_PATH,
-   RUNLOOP_CTL_SET_CONTENT_PATH,
-   RUNLOOP_CTL_CLEAR_CONTENT_PATH,
-
-   RUNLOOP_CTL_GET_DEFAULT_SHADER_PRESET,
-   RUNLOOP_CTL_SET_DEFAULT_SHADER_PRESET,
-   RUNLOOP_CTL_CLEAR_DEFAULT_SHADER_PRESET,
-
    RUNLOOP_CTL_SET_LIBRETRO_PATH,
 
    RUNLOOP_CTL_IS_SLOWMOTION,
@@ -81,16 +73,11 @@ enum runloop_ctl_state
    RUNLOOP_CTL_GLOBAL_FREE,
 
    RUNLOOP_CTL_SET_CORE_SHUTDOWN,
-   RUNLOOP_CTL_UNSET_CORE_SHUTDOWN,
-   RUNLOOP_CTL_IS_CORE_SHUTDOWN,
 
    RUNLOOP_CTL_SET_SHUTDOWN,
-   RUNLOOP_CTL_UNSET_SHUTDOWN,
    RUNLOOP_CTL_IS_SHUTDOWN,
 
    RUNLOOP_CTL_SET_EXEC,
-   RUNLOOP_CTL_UNSET_EXEC,
-   RUNLOOP_CTL_IS_EXEC,
 
    /* Runloop state */
    RUNLOOP_CTL_CLEAR_STATE,
@@ -110,9 +97,7 @@ enum runloop_ctl_state
    /* Message queue */
    RUNLOOP_CTL_MSG_QUEUE_INIT,
    RUNLOOP_CTL_MSG_QUEUE_DEINIT,
-   RUNLOOP_CTL_MSG_QUEUE_FREE,
    RUNLOOP_CTL_MSG_QUEUE_PULL,
-   RUNLOOP_CTL_MSG_QUEUE_CLEAR,
 
    /* Core options */
    RUNLOOP_CTL_HAS_CORE_OPTIONS,
@@ -126,10 +111,6 @@ enum runloop_ctl_state
    RUNLOOP_CTL_CORE_OPTIONS_DEINIT,
    RUNLOOP_CTL_CORE_OPTIONS_FREE,
 
-   /* Shader dir */
-   RUNLOOP_CTL_SHADER_DIR_DEINIT,
-   RUNLOOP_CTL_SHADER_DIR_INIT,
-
    /* System info */
    RUNLOOP_CTL_SYSTEM_INFO_GET,
    RUNLOOP_CTL_SYSTEM_INFO_INIT,
@@ -139,33 +120,6 @@ enum runloop_ctl_state
    RUNLOOP_CTL_HTTPSERVER_INIT,
    RUNLOOP_CTL_HTTPSERVER_DESTROY
 };
-
-typedef struct rarch_dir
-{
-   /* Used on reentrancy to use a savestate dir. */
-   char savefile[PATH_MAX_LENGTH];
-   char savestate[PATH_MAX_LENGTH];
-   char systemdir[PATH_MAX_LENGTH];
-#ifdef HAVE_OVERLAY
-   char osk_overlay[PATH_MAX_LENGTH];
-#endif
-} rarch_dir_t;
-
-typedef struct rarch_path
-{
-   char gb_rom[PATH_MAX_LENGTH];
-   char bsx_rom[PATH_MAX_LENGTH];
-   char sufami_rom[2][PATH_MAX_LENGTH];
-   /* Config associated with global "default" config. */
-   char config[PATH_MAX_LENGTH];
-   char append_config[PATH_MAX_LENGTH];
-   char input_config[PATH_MAX_LENGTH];
-#ifdef HAVE_FILE_LOGGER
-   char default_log[PATH_MAX_LENGTH];
-#endif
-   /* Config file associated with per-core configs. */
-   char core_options_path[PATH_MAX_LENGTH];
-} rarch_path_t;
 
 typedef struct rarch_resolution
 {
@@ -177,17 +131,8 @@ typedef struct rarch_resolution
 
 typedef struct global
 {
-   rarch_path_t path;
-   rarch_dir_t  dir;
-
    struct
    {
-      bool libretro_device[MAX_USERS];
-   } has_set;
-   
-   struct
-   {
-      char base[PATH_MAX_LENGTH];
       char savefile[PATH_MAX_LENGTH];
       char savestate[PATH_MAX_LENGTH];
       char cheatfile[PATH_MAX_LENGTH];
@@ -196,42 +141,6 @@ typedef struct global
       char ips[PATH_MAX_LENGTH];
       char remapfile[PATH_MAX_LENGTH];
    } name;
-
-   /* A list of save types and associated paths for all content. */
-   struct string_list *savefiles;
-
-   /* For --subsystem content. */
-   char subsystem[PATH_MAX_LENGTH];
-   struct string_list *subsystem_fullpaths;
-
-   struct
-   {
-      bool block_patch;
-      bool ups_pref;
-      bool bps_pref;
-      bool ips_pref;
-   } patch;
-
-   struct
-   {
-      bool load_disable;
-      bool save_disable;
-      bool use;
-   } sram;
-
-#ifdef HAVE_NETPLAY
-   /* Netplay. */
-   struct
-   {
-      char server[PATH_MAX_LENGTH];
-      bool enable;
-      bool is_client;
-      bool is_spectate;
-      unsigned sync_frames;
-      unsigned check_frames;
-      unsigned port;
-   } netplay;
-#endif
 
    /* Recording. */
    struct
@@ -307,9 +216,6 @@ void runloop_msg_queue_push(const char *msg, unsigned prio,
       unsigned duration, bool flush);
 
 char* runloop_msg_queue_pull(void);
-
-bool runloop_is_quit_confirm(void);
-void runloop_set_quit_confirm(bool on);
 
 bool runloop_ctl(enum runloop_ctl_state state, void *data);
 

@@ -71,26 +71,23 @@ static bool d3d_init_luts(d3d_video_t *d3d)
    unsigned i;
    settings_t *settings = config_get_ptr();
 
-   if (!d3d->renderchain_driver->add_lut)
+   if (!d3d->renderchain_driver || !d3d->renderchain_driver->add_lut)
       return true;
 
    for (i = 0; i < d3d->shader.luts; i++)
    {
-      bool ret = d3d->renderchain_driver->add_lut(
+      if (!d3d->renderchain_driver->add_lut(
             d3d->renderchain_data,
             d3d->shader.lut[i].id, d3d->shader.lut[i].path,
             d3d->shader.lut[i].filter == RARCH_FILTER_UNSPEC ?
             settings->video.smooth :
-            (d3d->shader.lut[i].filter == RARCH_FILTER_LINEAR));
-
-      if (!ret)
-         return ret;
+            (d3d->shader.lut[i].filter == RARCH_FILTER_LINEAR)))
+         return false;
    }
 
    return true;
 }
 
-#ifndef DONT_HAVE_STATE_TRACKER
 static bool d3d_init_imports(d3d_video_t *d3d)
 {
    retro_ctx_memory_info_t    mem_info;
@@ -99,7 +96,7 @@ static bool d3d_init_imports(d3d_video_t *d3d)
 
    if (!d3d->shader.variables)
       return true;
-   if (!d3d->renderchain_driver->add_state_tracker)
+   if (!d3d->renderchain_driver || !d3d->renderchain_driver->add_state_tracker)
       return true;
 
    mem_info.id = RETRO_MEMORY_SYSTEM_RAM;
@@ -133,7 +130,6 @@ static bool d3d_init_imports(d3d_video_t *d3d)
 
    return true;
 }
-#endif
 
 static bool d3d_init_chain(d3d_video_t *d3d, const video_info_t *video_info)
 {
@@ -205,22 +201,18 @@ static bool d3d_init_chain(d3d_video_t *d3d, const video_info_t *video_info)
          return false;
       }
    }
+#endif
 
    if (!d3d_init_luts(d3d))
    {
       RARCH_ERR("[D3D9]: Failed to init LUTs.\n");
       return false;
    }
-
-#ifndef DONT_HAVE_STATE_TRACKER
    if (!d3d_init_imports(d3d))
    {
       RARCH_ERR("[D3D9]: Failed to init imports.\n");
       return false;
    }
-#endif
-
-#endif
 
    return true;
 }
@@ -347,23 +339,8 @@ static void d3d_overlay_render(d3d_video_t *d3d, overlay_t *overlay)
    unsigned i;
    float vert[4][9];
    float overlay_width, overlay_height;
-#ifndef _XBOX1
-   LPDIRECT3DVERTEXDECLARATION vertex_decl;
-   /* set vertex declaration for overlay. */
-   D3DVERTEXELEMENT vElems[4] = {
-      {0, 0,  D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT,
-         D3DDECLUSAGE_POSITION, 0},
-      {0, 12, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT,
-         D3DDECLUSAGE_TEXCOORD, 0},
-      {0, 20, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT,
-         D3DDECLUSAGE_COLOR, 0},
-      D3DDECL_END()
-   };
-#endif
 
-   if (!d3d)
-      return;
-   if (!overlay || !overlay->tex)
+   if (!d3d || !overlay || !overlay->tex)
       return;
 
    if (!overlay->vert_buf)
@@ -386,8 +363,8 @@ static void d3d_overlay_render(d3d_video_t *d3d, overlay_t *overlay)
    
    d3d_viewport_info(d3d, &vp);
 
-   overlay_width  = vp.width;
-   overlay_height = vp.height;
+   overlay_width   = vp.width;
+   overlay_height  = vp.height;
 
    vert[0][0]      = overlay->vert_coords[0] * overlay_width;
    vert[1][0]      = (overlay->vert_coords[0] + overlay->vert_coords[2])
@@ -418,26 +395,40 @@ static void d3d_overlay_render(d3d_video_t *d3d, overlay_t *overlay)
       vert[i][1]  += 0.5f;
    }
 
-   overlay->vert_buf->Lock(0, sizeof(vert), &verts, 0);
+   verts = d3d_vertex_buffer_lock(overlay->vert_buf);
    memcpy(verts, vert, sizeof(vert));
    d3d_vertex_buffer_unlock(overlay->vert_buf);
 
    d3d_enable_blend_func(d3d->dev);
 
 #ifndef _XBOX1
-   d3d->dev->CreateVertexDeclaration(vElems, &vertex_decl);
-   d3d_set_vertex_declaration(d3d->dev, vertex_decl);
-   vertex_decl->Release();
+   {
+      LPDIRECT3DVERTEXDECLARATION vertex_decl;
+      /* set vertex declaration for overlay. */
+      D3DVERTEXELEMENT vElems[4] = {
+         {0, 0,  D3DDECLTYPE_FLOAT3, D3DDECLMETHOD_DEFAULT,
+            D3DDECLUSAGE_POSITION, 0},
+         {0, 12, D3DDECLTYPE_FLOAT2, D3DDECLMETHOD_DEFAULT,
+            D3DDECLUSAGE_TEXCOORD, 0},
+         {0, 20, D3DDECLTYPE_FLOAT4, D3DDECLMETHOD_DEFAULT,
+            D3DDECLUSAGE_COLOR, 0},
+         D3DDECL_END()
+      };
+      d3d->dev->CreateVertexDeclaration(vElems, &vertex_decl);
+      d3d_set_vertex_declaration(d3d->dev, vertex_decl);
+      vertex_decl->Release();
+   }
 #endif
 
    d3d_set_stream_source(d3d->dev, 0, overlay->vert_buf,
          0, sizeof(*vert));
 
-   video_driver_get_size(&width, &height);
 
    if (overlay->fullscreen)
    {
       D3DVIEWPORT vp_full;
+
+      video_driver_get_size(&width, &height);
 
       vp_full.X      = 0;
       vp_full.Y      = 0;
@@ -487,7 +478,8 @@ static void d3d_deinitialize(d3d_video_t *d3d)
    if (!d3d)
       return;
 
-   font_driver_free(NULL);
+   font_driver_free_osd();
+
    d3d_deinit_chain(d3d);
 }
 
@@ -503,8 +495,9 @@ void d3d_make_d3dpp(void *data,
 
    memset(d3dpp, 0, sizeof(*d3dpp));
 
+#ifdef _XBOX
    d3dpp->Windowed             = false;
-#ifndef _XBOX
+#else
    d3dpp->Windowed             = settings->video.windowed_fullscreen 
       || !info->fullscreen;
 #endif
@@ -815,13 +808,7 @@ static bool d3d_initialize(d3d_video_t *d3d, const video_info_t *info)
    strlcpy(settings->path.font, "game:\\media\\Arial_12.xpr",
          sizeof(settings->path.font));
 #endif
-   if (!font_driver_init_first(NULL, NULL,
-            d3d, settings->path.font, 0, false,
-            FONT_DRIVER_RENDER_DIRECT3D_API))
-   {
-      RARCH_ERR("[D3D]: Failed to initialize font renderer.\n");
-      return false;
-   }
+   font_driver_init_osd(d3d, false, FONT_DRIVER_RENDER_DIRECT3D_API);
 
    return true;
 }
@@ -1519,18 +1506,6 @@ static bool d3d_frame(void *data, const void *frame,
    if (font_driver_has_render_msg() && msg)
    {
       struct font_params font_parms = {0};
-#ifdef _XBOX
-#if defined(_XBOX1)
-      float msg_width               = 60;
-      float msg_height              = 365;
-#elif defined(_XBOX360)
-      float msg_width               = d3d->resolution_hd_enable ? 160 : 100;
-      float msg_height              = 120;
-#endif
-      font_parms.x                  = msg_width;
-      font_parms.y                  = msg_height;
-      font_parms.scale              = 21;
-#endif
       font_driver_render_msg(NULL, msg, &font_parms);
    }
 

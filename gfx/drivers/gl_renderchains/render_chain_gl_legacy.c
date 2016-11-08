@@ -37,7 +37,8 @@
 #include <string/stdstring.h>
 #include <libretro.h>
 
-#include "../gl_capabilities.h"
+#include <gfx/gl_capabilities.h>
+#include <gfx/video_frame.h>
 
 #include "../../../driver.h"
 #include "../../../configuration.h"
@@ -56,7 +57,6 @@
 
 #include "../../font_driver.h"
 #include "../../video_context_driver.h"
-#include "../../video_frame.h"
 
 #ifdef HAVE_GLSL
 #include "../../drivers_shader/shader_glsl.h"
@@ -870,12 +870,6 @@ bool gl_init_hw_render(gl_t *gl, unsigned width, unsigned height)
    depth   = hwr->depth;
    stencil = hwr->stencil;
 
-#ifdef HAVE_OPENGLES
-   if (!gl_check_capability(GL_CAPS_PACKED_DEPTH_STENCIL))
-      return false;
-   RARCH_LOG("[GL]: Supports Packed depth stencil.\n");
-#endif
-
    if (depth)
    {
       glGenRenderbuffers(gl->textures, gl->hw_render_depth);
@@ -969,8 +963,11 @@ void gl_renderchain_bind_prev_texture(
 bool gl_renderchain_add_lut(const struct video_shader *shader,
       unsigned i, GLuint *textures_lut)
 {
-   struct texture_image img = {0};
+   struct texture_image img;
    enum texture_filter_type filter_type = TEXTURE_FILTER_LINEAR;
+
+   img.width  = img.height = 0;
+   img.pixels = NULL;
 
    if (!image_texture_load(&img, shader->lut[i].path))
    {

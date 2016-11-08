@@ -1,6 +1,8 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2014-2016 - Jean-André Santoni
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -210,11 +212,17 @@ typedef struct settings
    struct
    {
       char driver[32];
-      char device[PATH_MAX_LENGTH];
+      char device[255];
       bool allow;
       unsigned width;
       unsigned height;
    } camera;
+
+   struct
+   {
+      char driver[32];
+      bool allow;
+   } wifi;
 
    struct
    {
@@ -228,7 +236,7 @@ typedef struct settings
    {
       char driver[32];
       char resampler[32];
-      char device[PATH_MAX_LENGTH];
+      char device[255];
       bool enable;
       bool mute_enable;
       unsigned out_rate;
@@ -271,7 +279,6 @@ typedef struct settings
       unsigned device[MAX_USERS];
       unsigned device_name_index[MAX_USERS];
       bool autodetect_enable;
-      bool netplay_client_swap_input;
 
       unsigned turbo_period;
       unsigned turbo_duty_cycle;
@@ -289,7 +296,10 @@ typedef struct settings
       unsigned menu_toggle_gamepad_combo;
       bool back_as_menu_toggle_enable;
       bool all_users_control_menu;
-
+#if defined(VITA)
+      bool backtouch_enable;
+      bool backtouch_toggle;
+#endif
 #if TARGET_OS_IPHONE
       bool small_keyboard_enable;
 #endif
@@ -312,8 +322,8 @@ typedef struct settings
 
    struct
    {
-      char buildbot_url[PATH_MAX_LENGTH];
-      char buildbot_assets_url[PATH_MAX_LENGTH];
+      char buildbot_url[255];
+      char buildbot_assets_url[255];
       bool buildbot_auto_extract_archive;
    } network;
 
@@ -389,6 +399,18 @@ typedef struct settings
       char menu_content[PATH_MAX_LENGTH];
    } directory;
 
+#ifdef HAVE_NETWORKING
+   struct
+   {
+      char server[255];
+      unsigned port;
+      unsigned sync_frames;
+      unsigned check_frames;
+      bool is_spectate;
+      bool swap_input;
+   } netplay;
+#endif
+
    unsigned content_history_size;
 
    unsigned libretro_log_level;
@@ -446,7 +468,6 @@ typedef struct settings
 #endif
 
    bool config_save_on_exit;
-   bool confirm_on_exit;
    bool show_hidden_files;
 
 #ifdef HAVE_LAKKA
@@ -465,6 +486,15 @@ typedef struct settings
  * Returns: Default camera driver.
  **/
 const char *config_get_default_camera(void);
+
+/**
+ * config_get_default_wifi:
+ *
+ * Gets default wifi driver.
+ *
+ * Returns: Default wifi driver.
+ **/
+const char *config_get_default_wifi(void);
 
 /**
  * config_get_default_location:
@@ -630,22 +660,6 @@ bool config_init(void);
 bool config_overlay_enable_default(void);
 
 void config_free(void);
-
-const char *config_get_active_path(void);
-
-const char *config_get_active_core_path(void);
-
-char *config_get_active_core_path_ptr(void);
-
-void config_set_active_core_path(const char *path);
-
-void config_clear_active_core_path(void);
-
-bool config_active_core_path_is_empty(void);
-
-size_t config_get_active_core_path_size(void);
-
-void config_free_state(void);
 
 settings_t *config_get_ptr(void);
 

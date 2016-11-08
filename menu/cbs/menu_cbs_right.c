@@ -285,7 +285,8 @@ static int action_right_shader_filter_default(unsigned type, const char *label,
    rarch_setting_t *setting = menu_setting_find_enum(MENU_ENUM_LABEL_VIDEO_SMOOTH);
    if (!setting)
       return menu_cbs_exit();
-   return menu_action_handle_setting(setting, setting_get_type(setting), MENU_ACTION_RIGHT,
+   return menu_action_handle_setting(setting,
+         setting_get_type(setting), MENU_ACTION_RIGHT,
          wraparound);
 #else
    return 0;
@@ -338,19 +339,21 @@ static int action_right_video_resolution(unsigned type, const char *label,
 static int playlist_association_right(unsigned type, const char *label,
       bool wraparound)
 {
-   size_t i, next, found, current = 0;
-   char core_path[PATH_MAX_LENGTH]  = {0};
+   char core_path[PATH_MAX_LENGTH];
+   char new_playlist_cores[PATH_MAX_LENGTH];
+   size_t i, next, found, current   = 0;
    core_info_t *info                = NULL;
    struct string_list *stnames      = NULL;
    struct string_list *stcores      = NULL;
-   char new_playlist_cores[PATH_MAX_LENGTH] = {0};
+   core_info_list_t           *list = NULL;
    settings_t *settings             = config_get_ptr();
    const char *path                 = path_basename(label);
-   core_info_list_t           *list = NULL;
    
    core_info_get_list(&list);
    if (!list)
       return menu_cbs_exit();
+
+   core_path[0] = new_playlist_cores[0] = '\0';
 
    stnames = string_split(settings->playlist_names, ";");
    stcores = string_split(settings->playlist_cores, ";");
@@ -521,7 +524,7 @@ static int menu_cbs_init_bind_right_compare_label(menu_file_list_cbs_t *cbs,
 
    if (cbs->setting)
    {
-      const char *parent_group   = menu_setting_get_parent_group(cbs->setting);
+      const char *parent_group   = cbs->setting->parent_group;
 
       if (string_is_equal(parent_group, msg_hash_to_str(MENU_ENUM_LABEL_MAIN_MENU)) 
                && (setting_get_type(cbs->setting) == ST_GROUP))
@@ -534,7 +537,9 @@ static int menu_cbs_init_bind_right_compare_label(menu_file_list_cbs_t *cbs,
    for (i = 0; i < MAX_USERS; i++)
    {
       uint32_t label_setting_hash;
-      char label_setting[PATH_MAX_LENGTH] = {0};
+      char label_setting[128];
+
+      label_setting[0] = '\0';
 
       snprintf(label_setting, sizeof(label_setting), "input_player%d_joypad_index", i + 1);
       label_setting_hash = msg_hash_calculate(label_setting);

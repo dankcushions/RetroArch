@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  * 
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -32,6 +33,10 @@
 #include "camera/camera_driver.h"
 #endif
 
+#ifdef HAVE_WIFI
+#include "wifi/wifi_driver.h"
+#endif
+
 #ifdef HAVE_LOCATION
 #include "location/location_driver.h"
 #endif
@@ -51,13 +56,15 @@
 struct string_list *dir_list_new_special(const char *input_dir,
       enum dir_list_type type, const char *filter)
 {
-   char ext_shaders[PATH_MAX_LENGTH] = {0};
-   char ext_name[PATH_MAX_LENGTH]    = {0};
+   char ext_shaders[255];
+   char ext_name[255];
    const char *dir                   = NULL;
    const char *exts                  = NULL;
    bool include_dirs                 = false;
    bool recursive                    = false;
    settings_t *settings              = config_get_ptr();
+
+   ext_shaders[0] = ext_name[0] = '\0';
 
    (void)input_dir;
 
@@ -175,6 +182,17 @@ struct string_list *string_list_new_special(enum string_list_type type,
          for (i = 0; camera_driver_find_handle(i); i++)
          {
             const char *opt  = camera_driver_find_ident(i);
+            *len            += strlen(opt) + 1;
+
+            string_list_append(s, opt, attr);
+         }
+         break;
+#endif
+      case STRING_LIST_WIFI_DRIVERS:
+#ifdef HAVE_WIFI
+         for (i = 0; wifi_driver_find_handle(i); i++)
+         {
+            const char *opt  = wifi_driver_find_ident(i);
             *len            += strlen(opt) + 1;
 
             string_list_append(s, opt, attr);

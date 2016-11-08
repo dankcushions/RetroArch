@@ -41,7 +41,7 @@ if [ "$HAVE_VIDEOCORE" = 'yes' ]; then
    [ -d /opt/vc/include ] && add_include_dirs /opt/vc/include
    [ -d /opt/vc/include/interface/vcos/pthreads ] && add_include_dirs /opt/vc/include/interface/vcos/pthreads
    [ -d /opt/vc/include/interface/vmcs_host/linux ] && add_include_dirs /opt/vc/include/interface/vmcs_host/linux
-   HAVE_GLES='auto'
+   HAVE_OPENGLES='auto'
    EXTRA_GL_LIBS="-lEGL -lGLESv2 -lbcm_host -lvcos -lvchiq_arm"
 fi
 
@@ -150,9 +150,17 @@ fi
 
 if [ "$OS" = 'Win32' ]; then
    HAVE_THREADS=yes
+   HAVE_THREAD_STORAGE=yes
    HAVE_DYLIB=yes
 else
    check_lib THREADS "$PTHREADLIB" pthread_create
+
+   if [ "$HAVE_THREADS" = 'yes' ]; then
+      check_lib THREAD_STORAGE "$PTHREADLIB" pthread_key_create
+   else
+      HAVE_THREAD_STORAGE=no
+   fi
+
    check_lib DYLIB "$DYLIB" dlopen
 fi
 
@@ -174,13 +182,11 @@ if [ "$HAVE_NETWORKING" = 'yes' ]; then
    fi
    HAVE_NETWORK_CMD=yes
    HAVE_NETWORKGAMEPAD=yes
-
-   [ "$HAVE_NETPLAY" != 'no' ] && HAVE_NETPLAY='yes'
 else
    echo "Warning: All networking features have been disabled."
    HAVE_NETWORK_CMD='no'
-   HAVE_NETPLAY='no'
    HAVE_NETWORKGAMEPAD='no'
+   HAVE_CHEEVOS='no'
 fi
 
 check_lib STDIN_CMD "$CLIB" fcntl
@@ -255,7 +261,7 @@ else
    HAVE_D3D9=no
 fi
 
-if [ "$HAVE_OPENGL" != 'no' ] && [ "$HAVE_GLES" != 'yes' ]; then
+if [ "$HAVE_OPENGL" != 'no' ] && [ "$HAVE_OPENGLES" != 'yes' ]; then
    if [ "$OS" = 'Darwin' ]; then
       check_header OPENGL "OpenGL/gl.h"
       check_lib OPENGL "-framework OpenGL"
@@ -290,10 +296,13 @@ if [ "$HAVE_OPENGL" != 'no' ] && [ "$HAVE_GLES" != 'yes' ]; then
    fi
 fi
 
-if [ "$OS" = 'Darwin' ]; then
-   check_lib ZLIB "-lz"
-else
+if [ "$HAVE_ZLIB" != 'no' ]; then
    check_pkgconf ZLIB zlib
+
+   if [ "$HAVE_ZLIB" = 'no' ]; then
+      HAVE_ZLIB='auto'
+      check_lib ZLIB '-lz'
+   fi
 fi
 
 if [ "$HAVE_THREADS" != 'no' ]; then
@@ -338,14 +347,14 @@ fi
 check_pkgconf LIBXML2 libxml-2.0
 
 if [ "$HAVE_EGL" = "yes" ]; then
-   if [ "$HAVE_GLES" != "no" ]; then
-      if [ "$GLES_LIBS" ] || [ "$GLES_CFLAGS" ]; then
-         echo "Notice: Using custom OpenGLES CFLAGS ($GLES_CFLAGS) and LDFLAGS ($GLES_LIBS)."
-         add_define_make GLES_LIBS "$GLES_LIBS"
-         add_define_make GLES_CFLAGS "$GLES_CFLAGS"
+   if [ "$HAVE_OPENGLES" != "no" ]; then
+      if [ "$OPENGLES_LIBS" ] || [ "$OPENGLES_CFLAGS" ]; then
+         echo "Notice: Using custom OpenGLES CFLAGS ($OPENGLES_CFLAGS) and LDFLAGS ($OPENGLES_LIBS)."
+         add_define_make OPENGLES_LIBS "$OPENGLES_LIBS"
+         add_define_make OPENGLES_CFLAGS "$OPENGLES_CFLAGS"
       else
-         HAVE_GLES=auto check_pkgconf GLES glesv2
-         [ "$HAVE_GLES" = "no" ] && HAVE_GLES=auto check_lib GLES "-lGLESv2 $EXTRA_GL_LIBS" && add_define_make GLES_LIBS "-lGLESv2 $EXTRA_GL_LIBS"
+         HAVE_OPENGLES=auto check_pkgconf OPENGLES glesv2
+         [ "$HAVE_OPENGLES" = "no" ] && HAVE_OPENGLES=auto check_lib OPENGLES "-lGLESv2 $EXTRA_GL_LIBS" && add_define_make OPENGLES_LIBS "-lGLESv2 $EXTRA_GL_LIBS"
       fi
    fi
    if [ "$HAVE_VG" != "no" ]; then
@@ -357,7 +366,7 @@ if [ "$HAVE_EGL" = "yes" ]; then
    fi
 else
    HAVE_VG=no
-   HAVE_GLES=no
+   HAVE_OPENGLES=no
 fi
 
 check_pkgconf V4L2 libv4l2
@@ -367,7 +376,7 @@ if [ "$OS" = 'Darwin' ]; then
 elif [ "$OS" = 'Win32' ]; then
    HAVE_FBO=yes
 else
-   if [ "$HAVE_GLES" = "yes" ]; then
+   if [ "$HAVE_OPENGLES" = "yes" ]; then
       [ $HAVE_FBO != "no" ] && HAVE_FBO=yes
    else
       check_lib FBO -lGL glFramebufferTexture2D
@@ -440,7 +449,7 @@ if [ "$HAVE_MATERIALUI" != 'no' ] || [ "$HAVE_XMB" != 'no' ] || [ "$HAVE_ZARCH" 
 		HAVE_XMB=no
       HAVE_ZARCH=no
 		echo "Notice: RGUI not available, MaterialUI, XMB and ZARCH will also be disabled."
-	elif [ "$HAVE_OPENGL" = 'no' ] && [ "$HAVE_GLES" = 'no' ] && [ "$HAVE_VULKAN" = 'no' ]; then
+	elif [ "$HAVE_OPENGL" = 'no' ] && [ "$HAVE_OPENGLES" = 'no' ] && [ "$HAVE_VULKAN" = 'no' ]; then
 		HAVE_MATERIALUI=no
 		HAVE_XMB=no
       HAVE_ZARCH=no

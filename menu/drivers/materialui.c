@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
- *  Copyright (C) 2014-2015 - Jean-André Santoni
+ *  Copyright (C) 2014-2016 - Jean-André Santoni
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -44,6 +45,7 @@
 #include "../menu_animation.h"
 #include "../menu_navigation.h"
 #include "../menu_display.h"
+#include "../menu_event.h"
 
 #include "../widgets/menu_input_dialog.h"
 
@@ -66,6 +68,8 @@ enum
    MUI_TEXTURE_TAB_MAIN,
    MUI_TEXTURE_TAB_PLAYLISTS,
    MUI_TEXTURE_TAB_SETTINGS,
+   MUI_TEXTURE_KEY,
+   MUI_TEXTURE_KEY_HOVER,
    MUI_TEXTURE_LAST
 };
 
@@ -87,7 +91,7 @@ typedef struct mui_handle
    unsigned icon_size;
    unsigned margin;
    unsigned glyph_width;
-   char box_message[PATH_MAX_LENGTH];
+   char box_message[1024];
 
    struct
    {
@@ -118,7 +122,10 @@ typedef struct mui_handle
       size_t selection_ptr;
    } categories;
 
-   video_font_raster_block_t list_block;
+   font_data_t *font;
+   font_data_t *font2;
+   video_font_raster_block_t raster_block;
+   video_font_raster_block_t raster_block2;
    float scroll_y;
 } mui_handle_t;
 
@@ -148,6 +155,10 @@ static const char *mui_texture_path(unsigned id)
          return "playlists_tab_passive.png";
       case MUI_TEXTURE_TAB_SETTINGS:
          return "settings_tab_passive.png";
+      case MUI_TEXTURE_KEY:
+         return "key.png";
+      case MUI_TEXTURE_KEY_HOVER:
+         return "key-hover.png";
    }
 
    return NULL;
@@ -156,7 +167,9 @@ static const char *mui_texture_path(unsigned id)
 static void mui_context_reset_textures(mui_handle_t *mui)
 {
    unsigned i;
-   char iconpath[PATH_MAX_LENGTH] = {0};
+   char iconpath[PATH_MAX_LENGTH];
+
+   iconpath[0] = '\0';
 
    fill_pathname_application_special(iconpath, sizeof(iconpath),
          APPLICATION_SPECIAL_DIRECTORY_ASSETS_MATERIALUI_ICONS);
@@ -248,55 +261,92 @@ static void mui_draw_tab(mui_handle_t *mui,
          &tab_color[0]);
 }
 
-static void mui_draw_text(float x, float y, unsigned width, unsigned height,
-      const char *msg, uint32_t color, enum text_alignment text_align)
+static void mui_render_keyboard(mui_handle_t *mui, const char *grid[], unsigned id)
 {
-   int font_size;
-   struct font_params params;
+   int ptr_width, ptr_height;
+   unsigned i, width, height;
+   float dark[16]=  {
+      0.00, 0.00, 0.00, 0.85,
+      0.00, 0.00, 0.00, 0.85,
+      0.00, 0.00, 0.00, 0.85,
+      0.00, 0.00, 0.00, 0.85,
+   };
 
-   font_size = menu_display_get_font_size();
+   float white[16]=  {
+      1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00,
+      1.00, 1.00, 1.00, 1.00,
+   };
 
-   params.x           = x / width;
-   params.y           = 1.0f - (y + font_size / 3) / height;
-   params.scale       = 1.0f;
-   params.drop_mod    = 0.0f;
-   params.drop_x      = 0.0f;
-   params.drop_y      = 0.0f;
-   params.color       = color;
-   params.full_screen = true;
-   params.text_align  = text_align;
+   video_driver_get_size(&width, &height);
 
-   menu_display_draw_text(msg, width, height, &params);
+   menu_display_draw_quad(0, height/2.0, width, height/2.0,
+         width, height,
+         &dark[0]);
+
+   ptr_width  = width / 11;
+   ptr_height = height / 10;
+
+   if (ptr_width >= ptr_height)
+      ptr_width = ptr_height;
+
+   for (i = 0; i < 44; i++)
+   {
+      int line_y        = (i / 11)*height/10.0;
+      uintptr_t texture = mui->textures.list[MUI_TEXTURE_KEY];
+
+      if (i == id)
+         texture = mui->textures.list[MUI_TEXTURE_KEY_HOVER];
+
+      menu_display_blend_begin();
+
+      menu_display_draw_texture(
+            width/2.0 - (11*ptr_width)/2.0 + (i % 11) * ptr_width,
+            height/2.0 + ptr_height*1.5 + line_y,
+            ptr_width, ptr_height,
+            width, height,
+            &white[0],
+            texture);
+
+      menu_display_draw_text(mui->font, grid[i],
+            width/2.0 - (11*ptr_width)/2.0 + (i % 11) * ptr_width + ptr_width/2.0,
+            height/2.0 + ptr_height + line_y + mui->font->size / 3,
+            width, height, 0xffffffff, TEXT_ALIGN_CENTER, 1.0f,
+            false, 0);
+   }
 }
 
-static void mui_render_quad(mui_handle_t *mui,
-      int x, int y, unsigned w, unsigned h,
-      unsigned width, unsigned height,
-      float *coord_color)
+/* Returns the OSK key at a given position */
+static int mui_osk_ptr_at_pos(void *data, int x, int y)
 {
-   menu_display_ctx_draw_t draw;
-   struct video_coords coords;
+   int ptr_width, ptr_height;
+   unsigned i, width, height;
 
-   coords.vertices      = 4;
-   coords.vertex        = NULL;
-   coords.tex_coord     = NULL;
-   coords.lut_tex_coord = NULL;
-   coords.color         = coord_color;
+   mui_handle_t *mui = (mui_handle_t*)data;
+   if (!mui)
+      return -1;
 
-   menu_display_blend_begin();
+   video_driver_get_size(&width, &height);
 
-   draw.x           = x;
-   draw.y           = (int)height - y - (int)h;
-   draw.width       = w;
-   draw.height      = h;
-   draw.coords      = &coords;
-   draw.matrix_data = NULL;
-   draw.texture     = menu_display_white_texture;
-   draw.prim_type   = MENU_DISPLAY_PRIM_TRIANGLESTRIP;
-   draw.pipeline.id = 0;
+   ptr_width  = width / 11;
+   ptr_height = height / 10;
 
-   menu_display_draw(&draw);
-   menu_display_blend_end();
+   if (ptr_width >= ptr_height)
+      ptr_width = ptr_height;
+
+   for (i = 0; i < 44; i++)
+   {
+      int line_y    = (i / 11)*height/10.0;
+      int ptr_x     = width/2.0 - (11*ptr_width)/2.0 + (i % 11) * ptr_width;
+      int ptr_y     = height/2.0 + ptr_height*1.5 + line_y - ptr_height;
+
+      if (x > ptr_x && x < ptr_x + ptr_width
+       && y > ptr_y && y < ptr_y + ptr_height)
+         return i;
+   }
+
+   return -1;
 }
 
 static void mui_draw_tab_begin(mui_handle_t *mui,
@@ -308,13 +358,13 @@ static void mui_draw_tab_begin(mui_handle_t *mui,
    mui->tabs_height = scale_factor / 3;
 
    /* tabs background */
-   mui_render_quad(mui, 0, height - mui->tabs_height, width,
+   menu_display_draw_quad(0, height - mui->tabs_height, width,
          mui->tabs_height,
          width, height,
          tabs_bg_color);
 
    /* tabs separator */
-   mui_render_quad(mui, 0, height - mui->tabs_height, width,
+   menu_display_draw_quad(0, height - mui->tabs_height, width,
          1,
          width, height,
          tabs_separator_color);
@@ -328,7 +378,7 @@ static void mui_draw_tab_end(mui_handle_t *mui,
    /* active tab marker */
    unsigned tab_width = width / (MUI_SYSTEM_TAB_END+1);
 
-   mui_render_quad(mui, mui->categories.selection_ptr * tab_width,
+   menu_display_draw_quad(mui->categories.selection_ptr * tab_width,
          height - (header_height/16),
          tab_width,
          header_height/16,
@@ -364,8 +414,7 @@ static void mui_draw_scrollbar(mui_handle_t *mui,
       if (scrollbar_height <= mui->scrollbar_width)
          scrollbar_height = mui->scrollbar_width;
 
-      mui_render_quad(mui,
-            width - mui->scrollbar_width - scrollbar_margin,
+      menu_display_draw_quad(            width - mui->scrollbar_width - scrollbar_margin,
             header_height + y,
             mui->scrollbar_width,
             scrollbar_height,
@@ -387,11 +436,10 @@ static void mui_get_message(void *data, const char *message)
 static void mui_render_messagebox(mui_handle_t *mui,
       const char *message, float *body_bg_color, uint32_t font_color)
 {
-   unsigned i, width, height;
+   unsigned i, width, height, y_position;
    int x, y, line_height, longest = 0, longest_width = 0;
    struct string_list *list = (struct string_list*)
       string_split(message, "\n");
-   void *fb_buf;
 
    if (!list)
       return;
@@ -400,12 +448,14 @@ static void mui_render_messagebox(mui_handle_t *mui,
 
    video_driver_get_size(&width, &height);
 
-   line_height = menu_display_get_font_size() * 1.2;
+   line_height = mui->font->size * 1.2;
+
+   y_position = height / 2;
+   if (menu_input_dialog_get_display_kb())
+      y_position = height / 4;
 
    x = width  / 2;
-   y = height / 2 - (list->size-1) * line_height / 2;
-
-   fb_buf = menu_display_get_font_buffer();
+   y = y_position - (list->size-1) * line_height / 2;
 
    /* find the longest line width */
    for (i = 0; i < list->size; i++)
@@ -415,14 +465,13 @@ static void mui_render_messagebox(mui_handle_t *mui,
       if (len > longest)
       {
          longest = len;
-         longest_width = font_driver_get_message_width(fb_buf, msg, len, 1);
+         longest_width = font_driver_get_message_width(mui->font, msg, len, 1);
       }
    }
 
    menu_display_set_alpha(body_bg_color, 1.0);
 
-   mui_render_quad(mui,
-         x - longest_width/2.0 - mui->margin*2.0,
+   menu_display_draw_quad(         x - longest_width/2.0 - mui->margin*2.0,
          y - line_height/2.0 - mui->margin*2.0,
          longest_width + mui->margin*4.0,
          line_height * list->size + mui->margin*4.0,
@@ -435,10 +484,15 @@ static void mui_render_messagebox(mui_handle_t *mui,
    {
       const char *msg = list->elems[i].data;
       if (msg)
-         mui_draw_text(x - longest_width/2.0, y + i * line_height,
-               width, height,
-               msg, font_color, TEXT_ALIGN_LEFT);
+         menu_display_draw_text(mui->font, msg,
+               x - longest_width/2.0,
+               y + i * line_height + mui->font->size / 3,
+               width, height, font_color, TEXT_ALIGN_LEFT, 1.0f, false, 0);
+
    }
+
+   if (menu_input_dialog_get_display_kb())
+      mui_render_keyboard(mui, menu_event_get_osk_grid(), menu_event_get_osk_ptr());
 
 end:
    string_list_free(list);
@@ -518,7 +572,7 @@ static void mui_render(void *data)
 }
 
 static void mui_render_label_value(mui_handle_t *mui,
-      int y, unsigned width, unsigned height,
+      int i, int y, unsigned width, unsigned height,
       uint64_t index, uint32_t color, bool selected, const char *label,
       const char *value, float *label_color)
 {
@@ -530,15 +584,19 @@ static void mui_render_label_value(mui_handle_t *mui,
       1.00, 1.00, 1.00, 1.00,
    };
 
-
    menu_animation_ctx_ticker_t ticker;
-   char label_str[PATH_MAX_LENGTH] = {0};
-   char value_str[PATH_MAX_LENGTH] = {0};
+   char label_str[255];
+   char sublabel_str[255];
+   char value_str[255];
+   float label_offset              = 0;
+   bool switch_is_on               = true;
    int value_len                   = utf8len(value);
    int ticker_limit                = 0;
    uintptr_t texture_switch        = 0;
    bool do_draw_text               = false;
    size_t usable_width             = width - (mui->margin * 2);
+
+   label_str[0] = value_str[0] = sublabel_str[0] = '\0';
 
    if (value_len * mui->glyph_width > usable_width / 2)
       value_len = (usable_width/2) / mui->glyph_width;
@@ -559,10 +617,21 @@ static void mui_render_label_value(mui_handle_t *mui,
 
    menu_animation_ctl(MENU_ANIMATION_CTL_TICKER, &ticker);
 
-   mui_draw_text(mui->margin, y + mui->line_height / 2,
-         width, height, label_str, color, TEXT_ALIGN_LEFT);
+   label_offset = mui->font->size / 3;
+   if (menu_entry_get_sublabel(i, sublabel_str, sizeof(sublabel_str)))
+   {
+      label_offset = -mui->font->size / 3;
+      menu_display_draw_text(mui->font2, sublabel_str,
+            mui->margin,
+            y + mui->line_height / 2 + mui->font->size / 1,
+            width, height, 0x888888ff, TEXT_ALIGN_LEFT, 1.0f, false, 0);
+   }
 
-   bool switch_is_on = true;
+   menu_display_draw_text(mui->font, label_str,
+         mui->margin,
+         y + mui->line_height / 2 + label_offset,
+         width, height, color, TEXT_ALIGN_LEFT, 1.0f, false, 0);
+
    if (string_is_equal(value, "disabled") || string_is_equal(value, "off"))
    {
       if (mui->textures.list[MUI_TEXTURE_SWITCH_OFF]) {
@@ -619,9 +688,10 @@ static void mui_render_label_value(mui_handle_t *mui,
    }
 
    if (do_draw_text)
-      mui_draw_text(width - mui->margin,
-            y + mui->line_height / 2,
-            width, height, value_str, color, TEXT_ALIGN_RIGHT);
+      menu_display_draw_text(mui->font, value_str,
+            width - mui->margin,
+            y + mui->line_height / 2 + mui->font->size / 3,
+            width, height, color, TEXT_ALIGN_RIGHT, 1.0f, false, 0);
 
    if (texture_switch)
       mui_draw_icon(
@@ -654,7 +724,8 @@ static void mui_render_menu_list(mui_handle_t *mui,
 
    header_height = menu_display_get_header_height();
 
-   mui->list_block.carr.coords.vertices = 0;
+   mui->raster_block.carr.coords.vertices = 0;
+   mui->raster_block2.carr.coords.vertices = 0;
 
    menu_entries_ctl(MENU_ENTRIES_CTL_START_GET, &i);
 
@@ -662,9 +733,11 @@ static void mui_render_menu_list(mui_handle_t *mui,
    {
       int y;
       size_t selection;
-      char rich_label[PATH_MAX_LENGTH] = {0};
-      char entry_value[PATH_MAX_LENGTH] = {0};
+      char rich_label[255];
+      char entry_value[255];
       bool entry_selected = false;
+
+      rich_label[0] = entry_value[0] = '\0';
 
       if (!menu_navigation_ctl(MENU_NAVIGATION_CTL_GET_SELECTION, &selection))
          continue;
@@ -682,11 +755,12 @@ static void mui_render_menu_list(mui_handle_t *mui,
 
       mui_render_label_value(
          mui,
+         i,
          y,
          width,
          height,
          *frame_count / 20,
-         entry_selected ? font_hover_color : font_normal_color, 
+         font_hover_color, 
          entry_selected,
          rich_label, 
          entry_value, 
@@ -819,10 +893,20 @@ static void mui_frame(void *data)
    menu_display_ctx_clearcolor_t clearcolor;
    menu_animation_ctx_ticker_t ticker;
    menu_display_ctx_draw_t draw;
+   char msg[255];
+   char title[255];
+   char title_buf[255];
+   char title_msg[255];
 
+#ifdef VITA
+   uint32_t black_opaque_54        = 0x8a000000;
+   uint32_t black_opaque_87        = 0xde000000;
+   uint32_t white_opaque_70        = 0xb3ffffff;
+#else
    uint32_t black_opaque_54        = 0x0000008a;
    uint32_t black_opaque_87        = 0x000000de;
    uint32_t white_opaque_70        = 0xffffffb3;
+#endif
    /* https://material.google.com/style/color.html#color-color-palette */
    /* Hex values converted to RGB normalized decimals, alpha set to 1 */
    float blue_500[16]              = {0};
@@ -850,10 +934,6 @@ static void mui_frame(void *data)
    mui_handle_t *mui               = (mui_handle_t*)data;
    uint64_t *frame_count           = video_driver_get_frame_count_ptr();
    settings_t *settings            = config_get_ptr();
-   char msg[256]                   = {0};
-   char title[256]                 = {0};
-   char title_buf[256]             = {0};
-   char title_msg[256]             = {0};
    bool background_rendered        = false;
    bool libretro_running           = menu_display_libretro_running();
 
@@ -871,6 +951,8 @@ static void mui_frame(void *data)
 
    if (!mui)
       return;
+
+   msg[0] = title[0] = title_buf[0] = title_msg[0] = '\0';
 
    switch (settings->menu.materialui.menu_color_theme)
    {
@@ -1089,8 +1171,7 @@ static void mui_frame(void *data)
       menu_display_set_alpha(blue_50, 1.0);
 
    /* highlighted entry */
-   mui_render_quad(
-      mui, 
+   menu_display_draw_quad(
       0,
       header_height - mui->scroll_y + mui->line_height *selection,
       width,
@@ -1100,7 +1181,8 @@ static void mui_frame(void *data)
       &highlighted_entry_color[0]
    );
 
-   menu_display_font_bind_block(&mui->list_block);
+   menu_display_font_bind_block(mui->font, &mui->raster_block);
+   menu_display_font_bind_block(mui->font2, &mui->raster_block2);
 
    mui_render_menu_list(
       mui, 
@@ -1111,12 +1193,12 @@ static void mui_frame(void *data)
       &active_tab_marker_color[0]
    );
 
-   menu_display_font_flush_block();
+   menu_display_font_flush_block(mui->font);
+   menu_display_font_flush_block(mui->font2);
    menu_animation_ctl(MENU_ANIMATION_CTL_SET_ACTIVE, NULL);
 
    /* header */
-   mui_render_quad(
-      mui,
+   menu_display_draw_quad(
       0, 
       0, 
       width, 
@@ -1138,8 +1220,7 @@ static void mui_frame(void *data)
       mui_draw_tab_end(mui, width, height, header_height, &active_tab_marker_color[0]);
    }
 
-   mui_render_quad(
-      mui,
+   menu_display_draw_quad(
       0, 
       header_height, 
       width,
@@ -1180,9 +1261,11 @@ static void mui_frame(void *data)
    if (mui_get_core_title(title_msg, sizeof(title_msg)) == 0)
    {
       int ticker_limit, value_len;
-      char title_buf_msg_tmp[256] = {0};
-      char title_buf_msg[256]     = {0};
+      char title_buf_msg_tmp[255];
+      char title_buf_msg[255];
       size_t         usable_width = width - (mui->margin * 2);
+
+      title_buf_msg_tmp[0] = title_buf_msg[0] = '\0';
       
       snprintf(title_buf_msg, sizeof(title_buf), "%s (%s)",
             title_buf, title_msg);
@@ -1200,8 +1283,10 @@ static void mui_frame(void *data)
       strlcpy(title_buf, title_buf_msg_tmp, sizeof(title_buf));
    }
 
-   mui_draw_text(title_margin, header_height / 2, width, height,
-         title_buf, font_header_color, TEXT_ALIGN_LEFT);
+   menu_display_draw_text(mui->font, title_buf,
+         title_margin,
+         header_height / 2 + mui->font->size / 3,
+         width, height, font_header_color, TEXT_ALIGN_LEFT, 1.0f, false, 0);
 
    mui_draw_scrollbar(mui, width, height, &grey_bg[0]);
 
@@ -1210,14 +1295,14 @@ static void mui_frame(void *data)
       const char *str   = menu_input_dialog_get_buffer();
       const char *label = menu_input_dialog_get_label_buffer();
 
-      mui_render_quad(mui, 0, 0, width, height, width, height, &black_bg[0]);
+      menu_display_draw_quad(0, 0, width, height, width, height, &black_bg[0]);
       snprintf(msg, sizeof(msg), "%s\n%s", label, str);
       mui_render_messagebox(mui, msg, &body_bg_color[0], font_hover_color);
    }
 
    if (!string_is_empty(mui->box_message))
    {
-      mui_render_quad(mui, 0, 0, width, height, width, height, &black_bg[0]);
+      menu_display_draw_quad(0, 0, width, height, width, height, &black_bg[0]);
       mui_render_messagebox(mui, mui->box_message, &body_bg_color[0], font_hover_color);
       mui->box_message[0] = '\0';
    }
@@ -1237,9 +1322,8 @@ static void mui_frame(void *data)
 
 static void mui_layout(mui_handle_t *mui)
 {
-   void *fb_buf;
    float scale_factor;
-   int new_font_size;
+   int new_font_size, new_font_size2;
    unsigned width, height, new_header_height;
 
    video_driver_get_size(&width, &height);
@@ -1254,28 +1338,30 @@ static void mui_layout(mui_handle_t *mui)
 
    new_header_height    = scale_factor / 3;
    new_font_size        = scale_factor / 9;
+   new_font_size2       = scale_factor / 12;
 
    mui->shadow_height   = scale_factor / 36;
    mui->scrollbar_width = scale_factor / 36;
    mui->tabs_height     = scale_factor / 3;
-   mui->line_height     = scale_factor / 3;
+   mui->line_height     = scale_factor / 2.5;
    mui->margin          = scale_factor / 9;
    mui->icon_size       = scale_factor / 3;
 
    menu_display_set_header_height(new_header_height);
-   menu_display_set_font_size(new_font_size);
 
    /* we assume the average glyph aspect ratio is close to 3:4 */
    mui->glyph_width = new_font_size * 3/4;
 
-   menu_display_font(APPLICATION_SPECIAL_DIRECTORY_ASSETS_MATERIALUI_FONT);
+   mui->font = menu_display_font(APPLICATION_SPECIAL_DIRECTORY_ASSETS_MATERIALUI_FONT,
+         new_font_size);
 
-   fb_buf = menu_display_get_font_buffer();
+   mui->font2 = menu_display_font(APPLICATION_SPECIAL_DIRECTORY_ASSETS_MATERIALUI_FONT,
+         new_font_size2);
 
-   if (fb_buf) /* calculate a more realistic ticker_limit */
+   if (mui->font) /* calculate a more realistic ticker_limit */
    {
       unsigned m_width = 
-         font_driver_get_message_width(fb_buf, "a", 1, 1);
+         font_driver_get_message_width(mui->font, "a", 1, 1);
 
       if (m_width)
          mui->glyph_width = m_width;
@@ -1301,9 +1387,6 @@ static void *mui_init(void **userdata)
 
    *userdata = mui;
 
-   mui_layout(mui);
-   menu_display_allocate_white_texture();
-
    mui->cursor.size  = 64.0;
 
    return menu;
@@ -1320,7 +1403,8 @@ static void mui_free(void *data)
    if (!mui)
       return;
 
-   video_coord_array_free(&mui->list_block.carr);
+   video_coord_array_free(&mui->raster_block.carr);
+   video_coord_array_free(&mui->raster_block2.carr);
 
    font_driver_bind_block(NULL, NULL);
 }
@@ -1345,7 +1429,7 @@ static void mui_context_destroy(void *data)
    for (i = 0; i < MUI_TEXTURE_LAST; i++)
       video_driver_texture_unload(&mui->textures.list[i]);
 
-   menu_display_font_main_deinit();
+   menu_display_font_free(mui->font);
 
    mui_context_bg_destroy(mui);
 }
@@ -1627,9 +1711,6 @@ static int mui_list_push(void *data, void *userdata,
             menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
          }
 
-         entry.enum_idx      = MENU_ENUM_LABEL_START_VIDEO_PROCESSOR;
-         menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
-
 #ifndef HAVE_DYNAMIC
          if (frontend_driver_has_fork())
 #endif
@@ -1645,11 +1726,10 @@ static int mui_list_push(void *data, void *userdata,
          menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
 
 #if defined(HAVE_NETWORKING)
-#if defined(HAVE_LIBRETRODB)
-         entry.enum_idx      = MENU_ENUM_LABEL_ADD_CONTENT_LIST;
-         menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
-#endif
          entry.enum_idx      = MENU_ENUM_LABEL_ONLINE_UPDATER;
+         menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
+
+         entry.enum_idx      = MENU_ENUM_LABEL_NETPLAY;
          menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
 #endif
          entry.enum_idx      = MENU_ENUM_LABEL_INFORMATION_LIST;
@@ -1658,23 +1738,8 @@ static int mui_list_push(void *data, void *userdata,
          entry.enum_idx      = MENU_ENUM_LABEL_RESTART_RETROARCH;
          menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
 #endif
-         entry.enum_idx      = MENU_ENUM_LABEL_CONFIGURATIONS;
+         entry.enum_idx      = MENU_ENUM_LABEL_CONFIGURATIONS_LIST;
          menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
-
-         entry.enum_idx      = MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG;
-         menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
-
-         entry.enum_idx      = MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG_OVERRIDE_CORE;
-         menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
-
-         entry.enum_idx      = MENU_ENUM_LABEL_SAVE_CURRENT_CONFIG_OVERRIDE_GAME;
-         menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
-
-         entry.enum_idx      = MENU_ENUM_LABEL_SAVE_NEW_CONFIG;
-         menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
-
-         entry.enum_idx      = MENU_ENUM_LABEL_START_NET_RETROPAD;
-         menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry); 
 
          entry.enum_idx      = MENU_ENUM_LABEL_HELP_LIST;
          menu_displaylist_ctl(DISPLAYLIST_SETTING_ENUM, &entry);
@@ -1798,4 +1863,7 @@ menu_ctx_driver_t menu_ctx_mui = {
    "glui",
    mui_environ,
    mui_pointer_tap,
+   NULL,
+   NULL,
+   mui_osk_ptr_at_pos,
 };

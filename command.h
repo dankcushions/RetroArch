@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  * 
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -59,7 +60,6 @@ enum event_command
    CMD_EVENT_TAKE_SCREENSHOT,
    /* Quits RetroArch. */
    CMD_EVENT_QUIT,
-   CMD_EVENT_QUIT_CONFIRM,
    /* Reinitialize all drivers. */
    CMD_EVENT_REINIT,
    /* Toggles cheevos hardcore mode. */
@@ -157,11 +157,6 @@ enum event_command
    CMD_EVENT_SHADER_DIR_DEINIT,
    /* Initializes controllers. */
    CMD_EVENT_CONTROLLERS_INIT,
-   CMD_EVENT_SAVEFILES,
-   /* Initializes savefiles. */
-   CMD_EVENT_SAVEFILES_INIT,
-   /* Deinitializes savefiles. */
-   CMD_EVENT_SAVEFILES_DEINIT,
    /* Initializes cheats. */
    CMD_EVENT_CHEATS_INIT,
    /* Deinitializes cheats. */
@@ -196,7 +191,6 @@ enum event_command
    CMD_EVENT_RESIZE_WINDOWED_SCALE,
    /* Deinitializes temporary content. */
    CMD_EVENT_TEMPORARY_CONTENT_DEINIT,
-   CMD_EVENT_SUBSYSTEM_FULLPATHS_DEINIT,
    CMD_EVENT_LOG_FILE_DEINIT,
    /* Toggles disk eject. */
    CMD_EVENT_DISK_EJECT_TOGGLE,
@@ -220,7 +214,7 @@ enum event_command
 };
 
 #ifdef HAVE_COMMAND
-#if defined(HAVE_NETWORK_CMD) && defined(HAVE_NETPLAY)
+#if defined(HAVE_NETWORKING) && defined(HAVE_NETWORK_CMD)
 bool command_network_send(const char *cmd_);
 #endif
 #endif

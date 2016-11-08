@@ -105,8 +105,11 @@ static void *android_gfx_ctx_init(void *video_driver)
 #ifdef HAVE_OPENGLES
    EGLint n, major, minor;
    EGLint format;
+   struct retro_hw_render_callback *hwr = video_driver_get_hw_context();
+   bool debug = hwr->debug_context;
    EGLint context_attributes[] = {
       EGL_CONTEXT_CLIENT_VERSION, g_es3 ? 3 : 2,
+      EGL_CONTEXT_FLAGS_KHR, debug ? EGL_CONTEXT_OPENGL_DEBUG_BIT_KHR : 0,
       EGL_NONE
    };
    EGLint attribs[] = {
@@ -308,9 +311,11 @@ static bool android_gfx_ctx_set_resize(void *data,
 
 static void android_gfx_ctx_update_window_title(void *data)
 {
-   char buf[128]        = {0};
-   char buf_fps[128]    = {0};
+   char buf[128];
+   char buf_fps[128];
    settings_t *settings = config_get_ptr();
+
+   buf[0] = buf_fps[0] = '\0';
 
    video_monitor_get_fps(buf, sizeof(buf),
          buf_fps, sizeof(buf_fps));
@@ -444,7 +449,6 @@ static bool android_gfx_ctx_get_metrics(void *data,
 	enum display_metric_types type, float *value)
 {
    static int dpi = -1;
-   char density[PROP_VALUE_MAX] = {0};
 
    switch (type)
    {
@@ -455,6 +459,9 @@ static bool android_gfx_ctx_get_metrics(void *data,
       case DISPLAY_METRIC_DPI:
          if (dpi == -1)
          {
+            char density[PROP_VALUE_MAX];
+            density[0] = '\0';
+
             dpi_get_density(density, sizeof(density));
             if (string_is_empty(density))
                goto dpi_fallback;

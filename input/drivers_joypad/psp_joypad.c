@@ -20,8 +20,29 @@
 
 #include "../../configuration.h"
 
-#if defined(SN_TARGET_PSP2) || defined(VITA)
-#define PSP_MAX_PADS 2
+#if defined(VITA)
+#include <psp2/kernel/sysmem.h>
+#include <psp2/touch.h>
+#define PSP_MAX_PADS 4
+static int psp2_model;
+static SceCtrlPortInfo old_ctrl_info, curr_ctrl_info;
+static SceCtrlActuator actuators[PSP_MAX_PADS] = {0};
+
+#define LERP(p, f, t) ((((p * 10) * (t * 10)) / (f * 10)) / 10)
+#define AREA(lx, ly, rx, ry, x, y) (lx <= x && x < rx && ly <= y && y < ry)
+#define TOUCH_MAX_WIDTH 1919
+#define TOUCH_MAX_HEIGHT 1087
+#define SCREEN_WIDTH PSP_FB_WIDTH
+#define SCREEN_HEIGHT PSP_FB_HEIGHT
+#define SCREEN_HALF_WIDTH SCREEN_WIDTH / 2
+#define SCREEN_HALF_HEIGHT SCREEN_HEIGHT / 2
+#define NW_AREA(x, y) AREA(0, 0, SCREEN_HALF_WIDTH, SCREEN_HALF_HEIGHT, (x), (y))
+#define NE_AREA(x, y) AREA(SCREEN_HALF_WIDTH, 0, SCREEN_WIDTH, SCREEN_HALF_HEIGHT, (x), (y))
+#define SW_AREA(x, y) AREA(0, SCREEN_HALF_HEIGHT, SCREEN_HALF_WIDTH, SCREEN_HEIGHT, (x), (y))
+#define SE_AREA(x, y) AREA(SCREEN_HALF_WIDTH, SCREEN_HALF_HEIGHT, SCREEN_WIDTH, SCREEN_HEIGHT, (x), (y))
+
+#elif defined(SN_TARGET_PSP2)
+#define PSP_MAX_PADS 4
 #else
 #define PSP_MAX_PADS 1
 #endif
@@ -33,7 +54,17 @@ extern uint64_t lifecycle_state;
 static const char *psp_joypad_name(unsigned pad)
 {
 #ifdef VITA
-   return "Vita Controller";
+   if (psp2_model != SCE_KERNEL_MODEL_VITATV)
+      return "Vita Controller";
+
+   switch (curr_ctrl_info.port[pad + 1]) {
+      case SCE_CTRL_TYPE_DS3:
+         return "DS3 Controller";
+      case SCE_CTRL_TYPE_DS4:
+         return "DS4 Controller";
+      default:
+         return "Unpaired";
+   }
 #else
    return "PSP Controller";
 #endif
@@ -61,6 +92,17 @@ static bool psp_joypad_init(void *data)
    unsigned players_count = PSP_MAX_PADS;
 
    (void)data;
+
+#if defined(VITA)
+   psp2_model = sceKernelGetModelForCDialog();
+   if (psp2_model != SCE_KERNEL_MODEL_VITATV) {
+      sceTouchSetSamplingState(SCE_TOUCH_PORT_BACK, SCE_TOUCH_SAMPLING_STATE_START);
+      sceTouchSetSamplingState(SCE_TOUCH_PORT_FRONT, SCE_TOUCH_SAMPLING_STATE_START);
+      players_count = 1;
+   }
+   sceCtrlGetControllerPortInfo(&curr_ctrl_info);
+   memcpy(&old_ctrl_info, &curr_ctrl_info, sizeof(SceCtrlPortInfo));
+#endif
 
    for (i = 0; i < players_count; i++)
       psp_joypad_autodetect_add(i);
@@ -130,11 +172,36 @@ static void psp_joypad_poll(void)
 {
    unsigned player;
    unsigned players_count = PSP_MAX_PADS;
+   settings_t *settings = config_get_ptr();
+
 #ifdef PSP
    sceCtrlSetSamplingCycle(0);
 #endif
 
-   sceCtrlSetSamplingMode(DEFAULT_SAMPLING_MODE);
+#ifdef VITA
+   if (psp2_model != SCE_KERNEL_MODEL_VITATV) {
+      players_count = 1;
+   } else {
+      sceCtrlGetControllerPortInfo(&curr_ctrl_info);
+      for (player = 0; player < players_count; player++) {
+         if (old_ctrl_info.port[player + 1] == curr_ctrl_info.port[player + 1])
+            continue;
+
+         if (old_ctrl_info.port[player + 1] != SCE_CTRL_TYPE_UNPAIRED &&
+               curr_ctrl_info.port[player + 1] == SCE_CTRL_TYPE_UNPAIRED) {
+            memset(&actuators[player], 0, sizeof(SceCtrlActuator));
+            input_config_autoconfigure_disconnect(player, psp_joypad.ident);
+         }
+
+         if (old_ctrl_info.port[player + 1] == SCE_CTRL_TYPE_UNPAIRED &&
+               curr_ctrl_info.port[player + 1] != SCE_CTRL_TYPE_UNPAIRED)
+            psp_joypad_autodetect_add(player);
+      }
+      memcpy(&old_ctrl_info, &curr_ctrl_info, sizeof(SceCtrlPortInfo));
+   }
+#endif
+
+   CtrlSetSamplingMode(DEFAULT_SAMPLING_MODE);
 
    BIT64_CLEAR(lifecycle_state, RARCH_MENU_TOGGLE);
 
@@ -143,12 +210,20 @@ static void psp_joypad_poll(void)
       unsigned j, k;
       SceCtrlData state_tmp;
       unsigned i  = player;
+#if defined(VITA)
+      unsigned p = (psp2_model == SCE_KERNEL_MODEL_VITATV) ? player + 1 : player;
+      if (curr_ctrl_info.port[p] == SCE_CTRL_TYPE_UNPAIRED)
+         continue;
+#elif defined(SN_TARGET_PSP2)
       /* Dumb hack, but here's the explanation - 
        * sceCtrlPeekBufferPositive's port parameter
        * can be 0 or 1 to read the first controller on
        * a PSTV, but HAS to be 0 for a real VITA and 2 
        * for the 2nd controller on a PSTV */
-      unsigned p  = (player == 1) ? 2 : player;
+      unsigned p  = (player > 0) ? player+1 : player;
+#else
+      unsigned p  = player;
+#endif
       int32_t ret = CtrlPeekBufferPositive(p, &state_tmp, 1);
 
       pad_state[i] = 0;
@@ -156,8 +231,24 @@ static void psp_joypad_poll(void)
          analog_state[i][1][0] = analog_state[i][1][1] = 0;
 
 #if defined(SN_TARGET_PSP2) || defined(VITA)
-      if(ret < 0)
-        continue;
+      if (ret < 0)
+         continue;
+#endif
+#if defined(VITA)
+      if (psp2_model == SCE_KERNEL_MODEL_VITA 
+         && !menu_driver_ctl(RARCH_MENU_CTL_IS_ALIVE, NULL)
+         && settings->input.backtouch_enable) {
+         SceTouchData touch_surface = {0};
+         sceTouchPeek(settings->input.backtouch_toggle ? SCE_TOUCH_PORT_FRONT : SCE_TOUCH_PORT_BACK, &touch_surface, 1);
+         for (int i = 0; i < touch_surface.reportNum; i++) {
+            int x = LERP(touch_surface.report[i].x, TOUCH_MAX_WIDTH, SCREEN_WIDTH);
+            int y = LERP(touch_surface.report[i].y, TOUCH_MAX_HEIGHT, SCREEN_HEIGHT);
+            if (NW_AREA(x, y)) state_tmp.buttons |= PSP_CTRL_L2;
+            if (NE_AREA(x, y)) state_tmp.buttons |= PSP_CTRL_R2;
+            if (SW_AREA(x, y)) state_tmp.buttons |= PSP_CTRL_L3;
+            if (SE_AREA(x, y)) state_tmp.buttons |= PSP_CTRL_R3;
+         }
+      }
 #endif
 #ifdef HAVE_KERNEL_PRX
       state_tmp.Buttons = (state_tmp.Buttons & 0x0000FFFF)
@@ -176,6 +267,12 @@ static void psp_joypad_poll(void)
       pad_state[i] |= (STATE_BUTTON(state_tmp) & PSP_CTRL_CIRCLE) ? (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_A) : 0;
       pad_state[i] |= (STATE_BUTTON(state_tmp) & PSP_CTRL_R) ? (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_R) : 0;
       pad_state[i] |= (STATE_BUTTON(state_tmp) & PSP_CTRL_L) ? (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_L) : 0;
+#if defined(VITA)
+      pad_state[i] |= (STATE_BUTTON(state_tmp) & PSP_CTRL_R2) ? (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_R2) : 0;
+      pad_state[i] |= (STATE_BUTTON(state_tmp) & PSP_CTRL_L2) ? (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_L2) : 0;
+      pad_state[i] |= (STATE_BUTTON(state_tmp) & PSP_CTRL_R3) ? (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_R3) : 0;
+      pad_state[i] |= (STATE_BUTTON(state_tmp) & PSP_CTRL_L3) ? (UINT64_C(1) << RETRO_DEVICE_ID_JOYPAD_L3) : 0;
+#endif
 
       analog_state[i][RETRO_DEVICE_INDEX_ANALOG_LEFT] [RETRO_DEVICE_ID_ANALOG_X] = (int16_t)(STATE_ANALOGLX(state_tmp)-128) * 256;
       analog_state[i][RETRO_DEVICE_INDEX_ANALOG_LEFT] [RETRO_DEVICE_ID_ANALOG_Y] = (int16_t)(STATE_ANALOGLY(state_tmp)-128) * 256;
@@ -205,29 +302,40 @@ static bool psp_joypad_rumble(unsigned pad,
       enum retro_rumble_effect effect, uint16_t strength)
 {
 #ifdef VITA
-   struct SceCtrlActuator params = {
-      0,
-  		0
-   };
-    
+   if (psp2_model != SCE_KERNEL_MODEL_VITATV)
+      return false;
+
    switch (effect)
    {
       case RETRO_RUMBLE_WEAK:
-         if (strength > 1)
-            strength = 1;
-         params.unk = strength;
+         switch (curr_ctrl_info.port[pad + 1]) {
+            case SCE_CTRL_TYPE_DS3:
+               actuators[pad].small = strength > 1 ? 1 : 0;
+               break;
+            case SCE_CTRL_TYPE_DS4:
+               actuators[pad].small = LERP(strength, 0xffff, 0xff);
+               break;
+            default:
+               actuators[pad].small = 0;
+         }
          break;
       case RETRO_RUMBLE_STRONG:
-         if (strength > 255)
-            strength = 255;
-         params.enable = strength;
+         switch (curr_ctrl_info.port[pad + 1]) {
+            case SCE_CTRL_TYPE_DS3:
+               actuators[pad].large = strength > 1 ? LERP(strength, 0xffff, 0xbf) + 0x40 : 0;
+               break;
+            case SCE_CTRL_TYPE_DS4:
+               actuators[pad].large = LERP(strength, 0xffff, 0xff);
+               break;
+            default:
+               actuators[pad].large = 0;
+         }
          break;
       case RETRO_RUMBLE_DUMMY:
       default:
          break;
    }
-   unsigned p  = (pad == 1) ? 2 : pad;
-   sceCtrlSetActuator(p, &params);
+   sceCtrlSetActuator(pad + 1, &actuators[pad]);
 
    return true;
 #else

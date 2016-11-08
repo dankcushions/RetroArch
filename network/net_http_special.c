@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
  *  Copyright (C) 2015-2016 - Andre Leiradella
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -78,6 +79,7 @@ int net_http_get(const char **result, size_t *size, const char *url, retro_time_
          goto error;
 
       memcpy((void*)res, (void*)data, length);
+      free(data);
       res[length] = 0;
       *result = res;
    }

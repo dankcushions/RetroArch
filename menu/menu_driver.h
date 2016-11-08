@@ -1,6 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -86,13 +87,10 @@ enum rarch_menu_ctl_state
    RARCH_MENU_CTL_NAVIGATION_DESCEND_ALPHABET,
    RARCH_MENU_CTL_IS_PENDING_QUICK_MENU,
    RARCH_MENU_CTL_SET_PENDING_QUICK_MENU,
-   RARCH_MENU_CTL_UNSET_PENDING_QUICK_MENU,
    RARCH_MENU_CTL_IS_PENDING_QUIT,
    RARCH_MENU_CTL_SET_PENDING_QUIT,
-   RARCH_MENU_CTL_UNSET_PENDING_QUIT,
    RARCH_MENU_CTL_IS_PENDING_SHUTDOWN,
    RARCH_MENU_CTL_SET_PENDING_SHUTDOWN,
-   RARCH_MENU_CTL_UNSET_PENDING_SHUTDOWN,
    RARCH_MENU_CTL_DEINIT,
    RARCH_MENU_CTL_INIT,
    RARCH_MENU_CTL_SHADER_DEINIT,
@@ -109,8 +107,6 @@ enum rarch_menu_ctl_state
    RARCH_MENU_CTL_IS_TOGGLE,
    RARCH_MENU_CTL_SET_TOGGLE,
    RARCH_MENU_CTL_UNSET_TOGGLE,
-   RARCH_MENU_CTL_SET_ALIVE,
-   RARCH_MENU_CTL_UNSET_ALIVE,
    RARCH_MENU_CTL_IS_ALIVE,
    RARCH_MENU_CTL_DESTROY,
    RARCH_MENU_CTL_IS_SET_TEXTURE,
@@ -146,6 +142,7 @@ enum rarch_menu_ctl_state
    RARCH_MENU_CTL_ENVIRONMENT,
    RARCH_MENU_CTL_DRIVER_DATA_GET,
    RARCH_MENU_CTL_POINTER_TAP,
+   RARCH_MENU_CTL_OSK_PTR_AT_POS,
    RARCH_MENU_CTL_BIND_INIT,
    RARCH_MENU_CTL_UPDATE_THUMBNAIL_PATH,
    RARCH_MENU_CTL_UPDATE_THUMBNAIL_IMAGE
@@ -182,6 +179,7 @@ enum menu_settings_type
    MENU_SETTING_GROUP,
    MENU_SETTING_SUBGROUP,
    MENU_SETTING_HORIZONTAL_MENU,
+   MENU_WIFI,
    MENU_INFO_MESSAGE,
    MENU_SETTINGS_SHADER_PARAMETER_0,
    MENU_SETTINGS_SHADER_PARAMETER_LAST = MENU_SETTINGS_SHADER_PARAMETER_0 + (GFX_MAX_PARAMETERS - 1),
@@ -220,14 +218,13 @@ enum menu_settings_type
 typedef struct
 {
    char deferred_path[PATH_MAX_LENGTH];
-
    char scratch_buf[PATH_MAX_LENGTH];
    char scratch2_buf[PATH_MAX_LENGTH];
 
    uint64_t state;
    struct
    {
-      char msg[PATH_MAX_LENGTH];
+      char msg[1024];
    } menu_state;
 
    char db_playlist_file[PATH_MAX_LENGTH];
@@ -278,6 +275,7 @@ typedef struct menu_ctx_driver
          menu_entry_t *entry, unsigned action);
    void (*update_thumbnail_path)(void *data, unsigned i);
    void (*update_thumbnail_image)(void *data);
+   int  (*osk_ptr_at_pos)(void *data, int x, int y);
 } menu_ctx_driver_t;
 
 typedef struct menu_ctx_load_image
@@ -383,6 +381,9 @@ extern unsigned int rdb_entry_start_game_selection_ptr;
 const char *menu_driver_ident(void);
 
 bool menu_driver_ctl(enum rarch_menu_ctl_state state, void *data);
+
+bool menu_driver_is_binding_state();
+void menu_driver_set_binding_state(bool on);
 
 extern menu_ctx_driver_t menu_ctx_xui;
 extern menu_ctx_driver_t menu_ctx_rgui;

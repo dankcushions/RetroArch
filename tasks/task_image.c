@@ -25,14 +25,6 @@
 #include <lists/string_list.h>
 #include <rhash.h>
 
-#ifdef HAVE_CONFIG_H
-#include "../config.h"
-#endif
-
-#ifdef HAVE_MENU
-#include "../menu/menu_driver.h"
-#endif
-
 #include "../file_path_special.h"
 #include "../verbosity.h"
 
@@ -47,8 +39,6 @@ enum image_status_enum
    IMAGE_STATUS_PROCESS_TRANSFER_PARSE,
    IMAGE_STATUS_TRANSFER_PARSE_FREE
 };
-
-typedef struct nbio_image_handle nbio_image_handle_t;
 
 struct nbio_image_handle
 {
@@ -68,8 +58,8 @@ struct nbio_image_handle
 static int cb_image_menu_upload_generic(void *data, size_t len)
 {
    unsigned r_shift, g_shift, b_shift, a_shift;
-   nbio_handle_t        *nbio = (nbio_handle_t*)data;
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   nbio_handle_t             *nbio = (nbio_handle_t*)data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    if (!image)
       return -1;
@@ -94,7 +84,7 @@ static int cb_image_menu_upload_generic(void *data, size_t len)
 
 static int task_image_iterate_transfer_parse(nbio_handle_t *nbio)
 {
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    if (image->handle && image->cb)
    {
@@ -110,7 +100,7 @@ static int task_image_process(
       unsigned *width,
       unsigned *height)
 {
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    int retval = image_transfer_process(
          image->handle,
@@ -130,7 +120,7 @@ static int cb_image_menu_generic(nbio_handle_t *nbio)
 {
    int retval;
    unsigned width = 0, height = 0;
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    if (!image)
       return -1;
@@ -148,7 +138,7 @@ static int cb_image_menu_generic(nbio_handle_t *nbio)
 static int cb_image_menu_thumbnail(void *data, size_t len)
 {
    nbio_handle_t        *nbio = (nbio_handle_t*)data; 
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    if (cb_image_menu_generic(nbio) != 0)
       return -1;
@@ -162,7 +152,7 @@ static int task_image_iterate_process_transfer(nbio_handle_t *nbio)
 {
    int retval = 0;
    unsigned i, width = 0, height = 0;
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    if (!image)
       return -1;
@@ -185,7 +175,7 @@ static int task_image_iterate_process_transfer(nbio_handle_t *nbio)
 static int task_image_iterate_transfer(nbio_handle_t *nbio)
 {
    unsigned i;
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    if (!image)
       goto error;
@@ -207,22 +197,23 @@ error:
 
 static void task_image_load_free_internal(nbio_handle_t *nbio)
 {
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
-   if (image) {
-      image_transfer_free(image->handle, nbio->image_type);
+   if (!image)
+      return;
 
-      image->handle                 = NULL;
-      image->cb                     = NULL;
+   image_transfer_free(image->handle, nbio->image_type);
 
-      free(image);
-   }
+   image->handle                 = NULL;
+   image->cb                     = NULL;
+
+   free(image);
 }
 
 static int cb_nbio_generic(nbio_handle_t *nbio, size_t *len)
 {
-   void *ptr                  = NULL;
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   void      *ptr                  = NULL;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    if (!image || !image->handle)
       goto error;
@@ -254,7 +245,7 @@ error:
 
 static int cb_nbio_image_menu_thumbnail(void *data, size_t len)
 {
-   nbio_image_handle_t *image = NULL;
+   struct nbio_image_handle *image = NULL;
    void *handle               = NULL;
    nbio_handle_t *nbio        = (nbio_handle_t*)data; 
 
@@ -266,7 +257,7 @@ static int cb_nbio_image_menu_thumbnail(void *data, size_t len)
    if (!handle)
       goto error;
 
-   image         = (nbio_image_handle_t*)nbio->data;
+   image         = (struct nbio_image_handle*)nbio->data;
  
    image->handle = handle;
    image->size   = len;
@@ -281,7 +272,7 @@ error:
 bool task_image_load_handler(retro_task_t *task)
 {
    nbio_handle_t       *nbio  = (nbio_handle_t*)task->state;
-   nbio_image_handle_t *image = (nbio_image_handle_t*)nbio->data;
+   struct nbio_image_handle *image = (struct nbio_image_handle*)nbio->data;
 
    switch (image->status)
    {
@@ -330,7 +321,7 @@ bool task_push_image_load(const char *fullpath,
    nbio_handle_t             *nbio   = NULL;
    retro_task_t             *t       = NULL;
    struct nbio_t             *handle = NULL;
-   nbio_image_handle_t        *image = NULL;
+   struct nbio_image_handle   *image = NULL;
 
    if (enum_idx == MSG_UNKNOWN)
       goto error_msg;
@@ -349,13 +340,13 @@ bool task_push_image_load(const char *fullpath,
 
    nbio->handle       = handle;
 
-   image              = (nbio_image_handle_t*)calloc(1, sizeof(*image));   
+   image              = (struct nbio_image_handle*)calloc(1, sizeof(*image));   
    if (!image)
       goto error;
 
    image->status      = IMAGE_STATUS_TRANSFER;
 
-   nbio->data         = (nbio_image_handle_t*)image;
+   nbio->data         = (struct nbio_image_handle*)image;
    nbio->is_finished  = false;
    nbio->cb           = &cb_nbio_image_menu_thumbnail;
    nbio->status       = NBIO_STATUS_TRANSFER;

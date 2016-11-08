@@ -2,7 +2,8 @@
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
  *  Copyright (C) 2013-2015 - Jason Fetters
- * 
+ *  Copyright (C) 2016 - Brad Parker
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -47,7 +48,7 @@ static void core_info_list_resolve_all_extensions(
    for (i = 0; i < core_info_list->count; i++)
    {
       if (core_info_list->list[i].supported_extensions)
-         all_ext_len += 
+         all_ext_len +=
             (strlen(core_info_list->list[i].supported_extensions) + 2);
    }
 
@@ -171,7 +172,7 @@ static config_file_t *core_info_list_iterate(
    fill_pathname_base_noext(info_path_base, contents->elems[i].data,
          sizeof(info_path_base));
 
-#if defined(RARCH_MOBILE) || (defined(RARCH_CONSOLE) && !defined(PSP))
+#if defined(RARCH_MOBILE) || (defined(RARCH_CONSOLE) && !defined(PSP) && !defined(_3DS) && !defined(VITA))
    char *substr = strrchr(info_path_base, '_');
    if (substr)
       *substr = '\0';
@@ -288,7 +289,7 @@ static core_info_list_t *core_info_list_new(void)
       core_info[i].path = strdup(contents->elems[i].data);
 
       if (!core_info[i].display_name)
-         core_info[i].display_name = 
+         core_info[i].display_name =
             strdup(path_basename(core_info[i].path));
    }
 
@@ -305,7 +306,7 @@ error:
    return NULL;
 }
 
-/* Shallow-copies internal state. 
+/* Shallow-copies internal state.
  *
  * Data in *info is invalidated when the
  * core_info_list is freed. */
@@ -322,7 +323,7 @@ static bool core_info_list_get_info(core_info_list_t *core_info_list,
    {
       const core_info_t *info = &core_info_list->list[i];
 
-      if (string_is_equal(path_basename(info->path), 
+      if (string_is_equal(path_basename(info->path),
                path_basename(path)))
       {
          *out_info = *info;
@@ -362,10 +363,10 @@ static int core_info_qsort_cmp(const void *a_, const void *b_)
 {
    const core_info_t *a = (const core_info_t*)a_;
    const core_info_t *b = (const core_info_t*)b_;
-   int support_a        = 
+   int support_a        =
          core_info_does_support_any_file(a, core_info_tmp_list)
       || core_info_does_support_file(a, core_info_tmp_path);
-   int support_b        = 
+   int support_b        =
          core_info_does_support_any_file(b, core_info_tmp_list)
       || core_info_does_support_file(b, core_info_tmp_path);
 
@@ -572,23 +573,22 @@ core_info_t *core_info_get(core_info_list_t *list, size_t i)
 void core_info_list_get_supported_cores(core_info_list_t *core_info_list,
       const char *path, const core_info_t **infos, size_t *num_infos)
 {
-#ifdef HAVE_ZLIB
+   size_t i;
    struct string_list *list = NULL;
-#endif
-   size_t supported = 0, i;
+   size_t supported         = 0;
 
    if (!core_info_list)
       return;
 
    core_info_tmp_path = path;
 
-#ifdef HAVE_ZLIB
-   if (string_is_equal_noncase(path_get_extension(path), "zip"))
+#ifdef HAVE_COMPRESSION
+   if (path_is_compressed_file(path))
       list = file_archive_get_file_list(path, NULL);
    core_info_tmp_list = list;
 #endif
 
-   /* Let supported core come first in list so we can return 
+   /* Let supported core come first in list so we can return
     * a pointer to them. */
    qsort(core_info_list->list, core_info_list->count,
          sizeof(core_info_t), core_info_qsort_cmp);
@@ -600,7 +600,7 @@ void core_info_list_get_supported_cores(core_info_list_t *core_info_list,
       if (core_info_does_support_file(core, path))
          continue;
 
-#ifdef HAVE_ZLIB
+#ifdef HAVE_COMPRESSION
       if (core_info_does_support_any_file(core, list))
          continue;
 #endif
@@ -608,10 +608,8 @@ void core_info_list_get_supported_cores(core_info_list_t *core_info_list,
       break;
    }
 
-#ifdef HAVE_ZLIB
    if (list)
       string_list_free(list);
-#endif
 
    *infos     = core_info_list->list;
    *num_infos = supported;
@@ -652,7 +650,7 @@ void core_info_get_name(const char *path, char *s, size_t len)
 
       if (!string_is_equal(contents->elems[i].data, path))
          continue;
-      
+
       conf = core_info_list_iterate(contents, i);
 
       if (conf)
@@ -689,6 +687,99 @@ size_t core_info_list_num_info_files(core_info_list_t *core_info_list)
    }
 
    return num;
+}
+
+bool core_info_unsupported_content_path(const char *path)
+{
+   size_t i;
+   const char *delim;
+   const char *archive_path = NULL;
+
+   delim = path_get_archive_delim(path);
+
+   if (delim)
+      archive_path = delim - 1;
+
+   if (!core_info_curr_list)
+      return false;
+
+   /* if the path contains a compressed file and the core supports archives,
+    * we don't want to look at this file */
+   if (archive_path)
+   {
+      for (i = 0; i < core_info_curr_list->count; i++)
+      {
+         const core_info_t *info = &core_info_curr_list->list[i];
+
+         if (string_list_find_elem(info->supported_extensions_list, "zip") ||
+             string_list_find_elem(info->supported_extensions_list, "7z"))
+             return false;
+      }
+   }
+
+   for (i = 0; i < core_info_curr_list->count; i++)
+   {
+      const core_info_t *info = &core_info_curr_list->list[i];
+      bool path_in_ext_list = string_list_find_elem(info->supported_extensions_list, path_get_extension(path));
+
+      if (path_in_ext_list)
+         return false;
+   }
+
+   return true;
+}
+
+bool core_info_database_supports_content_path(const char *database_path, const char *path)
+{
+   size_t i;
+   char *database;
+   const char *delim;
+   const char *archive_path = NULL;
+
+   if (!core_info_curr_list)
+      return false;
+
+   database = strdup(path_basename(database_path));
+
+   path_remove_extension(database);
+
+   delim = path_get_archive_delim(path);
+
+   if (delim)
+      archive_path = delim - 1;
+
+   /* if the path contains a compressed file and the core supports archives,
+    * we don't want to look at this file */
+   if (archive_path)
+   {
+      for (i = 0; i < core_info_curr_list->count; i++)
+      {
+         const core_info_t *info = &core_info_curr_list->list[i];
+
+         if (string_list_find_elem(info->databases_list, database))
+            if (string_list_find_elem(info->supported_extensions_list, "zip") ||
+                string_list_find_elem(info->supported_extensions_list, "7z"))
+                return false;
+      }
+   }
+
+   for (i = 0; i < core_info_curr_list->count; i++)
+   {
+      const core_info_t *info = &core_info_curr_list->list[i];
+      bool path_in_ext_list = string_list_find_elem(info->supported_extensions_list, path_get_extension(path));
+
+      if (path_in_ext_list)
+      {
+         if (string_list_find_elem(info->databases_list, database))
+         {
+            free(database);
+            return true;
+         }
+      }
+   }
+
+   free(database);
+   return false;
 }
 
 bool core_info_list_get_display_name(core_info_list_t *core_info_list,

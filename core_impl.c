@@ -2,6 +2,7 @@
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
  *  Copyright (C) 2012-2015 - Michael Lelli
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -30,7 +31,7 @@
 #include "config.h"
 #endif
 
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
 #include "network/netplay/netplay.h"
 #endif
 
@@ -43,6 +44,7 @@
 #include "verbosity.h"
 #include "gfx/video_driver.h"
 #include "audio/audio_driver.h"
+#include "cheevos.h"
 
 static struct retro_core_t core;
 static unsigned            core_poll_type;
@@ -52,6 +54,7 @@ static bool                core_game_loaded    = false;
 static bool                core_input_polled   = false;
 static bool   core_has_set_input_descriptors   = false;
 static struct retro_callbacks retro_ctx;
+static uint64_t            core_serialization_quirks_v = 0;
 
 static void core_input_state_poll_maybe(void)
 {
@@ -81,15 +84,12 @@ void core_set_input_state(retro_ctx_input_state_info_t *info)
  * core_init_libretro_cbs:
  * @data           : pointer to retro_callbacks object
  *
- * Initializes libretro callbacks, and binds the libretro callbacks 
+ * Initializes libretro callbacks, and binds the libretro callbacks
  * to default callback functions.
  **/
 static bool core_init_libretro_cbs(void *data)
 {
    struct retro_callbacks *cbs = (struct retro_callbacks*)data;
-#ifdef HAVE_NETPLAY
-   global_t            *global = global_get_ptr();
-#endif
 
    if (!cbs)
       return false;
@@ -102,17 +102,11 @@ static bool core_init_libretro_cbs(void *data)
 
    core_set_default_callbacks(cbs);
 
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
    if (!netplay_driver_ctl(RARCH_NETPLAY_CTL_IS_DATA_INITED, NULL))
       return true;
 
-   /* Force normal poll type for netplay. */
-   core_poll_type = POLL_TYPE_NORMAL;
-
-   core.retro_set_video_refresh(video_frame_net);
-   core.retro_set_audio_sample(audio_sample_net);
-   core.retro_set_audio_sample_batch(audio_sample_batch_net);
-   core.retro_set_input_state(input_state_net);
+   core_set_netplay_callbacks();
 #endif
 
    return true;
@@ -185,6 +179,28 @@ bool core_set_rewind_callbacks(void)
    return true;
 }
 
+#ifdef HAVE_NETWORKING
+/**
+ * core_set_netplay_callbacks:
+ *
+ * Set the I/O callbacks to use netplay's interceding callback system. Should
+ * only be called once.
+ **/
+bool core_set_netplay_callbacks(void)
+{
+   /* Force normal poll type for netplay. */
+   core_poll_type = POLL_TYPE_NORMAL;
+
+   /* And use netplay's interceding callbacks */
+   core.retro_set_video_refresh(video_frame_net);
+   core.retro_set_audio_sample(audio_sample_net);
+   core.retro_set_audio_sample_batch(audio_sample_batch_net);
+   core.retro_set_input_state(input_state_net);
+
+   return true;
+}
+#endif
+
 bool core_set_cheat(retro_ctx_cheat_info_t *info)
 {
    core.retro_cheat_set(info->index, info->enabled, info->code);
@@ -221,7 +237,8 @@ bool core_init_symbols(enum rarch_core_type *type)
 {
    if (!type)
       return false;
-   init_libretro_sym(*type, &core);
+   if (!init_libretro_sym(*type, &core))
+      return false;
    core_symbols_inited = true;
    return true;
 }
@@ -246,7 +263,8 @@ bool core_get_memory(retro_ctx_memory_info_t *info)
 bool core_load_game(retro_ctx_load_content_info_t *load_info)
 {
    if (load_info && load_info->special)
-      core_game_loaded = core.retro_load_game_special(load_info->special->id, load_info->info, load_info->content->size);
+      core_game_loaded = core.retro_load_game_special(
+            load_info->special->id, load_info->info, load_info->content->size);
    else if (load_info && *load_info->content->elems[0].data)
       core_game_loaded = core.retro_load_game(load_info->info);
    else
@@ -269,6 +287,11 @@ bool core_unserialize(retro_ctx_serialize_info_t *info)
       return false;
    if (!core.retro_unserialize(info->data_const, info->size))
       return false;
+
+#if HAVE_NETWORKING
+   netplay_driver_ctl(RARCH_NETPLAY_CTL_LOAD_SAVESTATE, info);
+#endif
+
    return true;
 }
 
@@ -289,14 +312,21 @@ bool core_serialize_size(retro_ctx_size_info_t *info)
    return true;
 }
 
-bool core_frame(retro_ctx_frame_info_t *info)
+uint64_t core_serialization_quirks(void)
 {
-   if (!info || !retro_ctx.frame_cb)
-      return false;
+   return core_serialization_quirks_v;
+}
 
-   retro_ctx.frame_cb(
-         info->data, info->width, info->height, info->pitch);
-   return true;
+void core_set_serialization_quirks(uint64_t quirks)
+{
+   core_serialization_quirks_v = quirks;
+}
+
+void core_frame(retro_ctx_frame_info_t *info)
+{
+   if (retro_ctx.frame_cb)
+      retro_ctx.frame_cb(
+            info->data, info->width, info->height, info->pitch);
 }
 
 bool core_poll(void)
@@ -326,6 +356,9 @@ bool core_get_system_av_info(struct retro_system_av_info *av_info)
 bool core_reset(void)
 {
    core.retro_reset();
+#ifdef HAVE_CHEEVOS
+   cheevos_reset_game();
+#endif
    return true;
 }
 
@@ -354,6 +387,14 @@ bool core_unload_game(void)
 
 bool core_run(void)
 {
+#ifdef HAVE_NETWORKING
+   if (!netplay_driver_ctl(RARCH_NETPLAY_CTL_PRE_FRAME, NULL))
+   {
+      /* Paused due to Netplay */
+      return true;
+   }
+#endif
+
    switch (core_poll_type)
    {
       case POLL_TYPE_EARLY:
@@ -362,17 +403,26 @@ bool core_run(void)
       case POLL_TYPE_LATE:
          core_input_polled = false;
          break;
+      default:
+         break;
    }
+
    if (core.retro_run)
       core.retro_run();
    if (core_poll_type == POLL_TYPE_LATE && !core_input_polled)
       input_poll();
+
+#ifdef HAVE_NETWORKING
+   netplay_driver_ctl(RARCH_NETPLAY_CTL_POST_FRAME, NULL);
+#endif
+
    return true;
 }
 
 bool core_load(void)
 {
    settings_t *settings = config_get_ptr();
+
    core_poll_type = settings->input.poll_type_behavior;
 
    if (!core_verify_api_version())
@@ -389,10 +439,10 @@ bool core_load(void)
 bool core_verify_api_version(void)
 {
    unsigned api_version = core.retro_api_version();
-   RARCH_LOG("%s: %u\n", 
+   RARCH_LOG("%s: %u\n",
          msg_hash_to_str(MSG_VERSION_OF_LIBRETRO_API),
          api_version);
-   RARCH_LOG("%s: %u\n",    
+   RARCH_LOG("%s: %u\n",
          msg_hash_to_str(MSG_COMPILED_AGAINST_API),
          RETRO_API_VERSION);
 

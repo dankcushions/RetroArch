@@ -45,6 +45,7 @@
 #include "../../msg_hash.h"
 #include "../../configuration.h"
 #include "../../driver.h"
+#include "../../paths.h"
 #include "../../runloop.h"
 #include "../../gfx/video_context_driver.h"
 #include "../../gfx/video_shader_driver.h"
@@ -580,7 +581,8 @@ LRESULT win32_menu_loop(HWND owner, WPARAM wparam)
                case ID_M_LOAD_CONTENT:
                   {
                      content_ctx_info_t content_info = {0};
-                     runloop_ctl(RUNLOOP_CTL_SET_CONTENT_PATH, win32_file);
+
+                     path_set(RARCH_PATH_CONTENT, win32_file);
 
                      do_wm_close = true;
                      task_push_content_load_default(

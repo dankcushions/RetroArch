@@ -39,12 +39,12 @@ static bool netplay_spectate_pre_frame(netplay_t *netplay)
    if (netplay_is_server(netplay))
    {
       fd_set fds;
-      struct timeval tmp_tv = {0};
       int new_fd, idx, i;
       struct sockaddr_storage their_addr;
       socklen_t addr_size;
       retro_ctx_serialize_info_t serial_info;
       uint32_t header[3];
+      struct timeval tmp_tv = {0};
 
       netplay->can_poll = true;
       input_poll_net();
@@ -109,6 +109,16 @@ static bool netplay_spectate_pre_frame(netplay_t *netplay)
          RARCH_ERR("%s\n", msg_hash_to_str(MSG_FAILED_TO_SEND_NICKNAME_TO_CLIENT));
          socket_close(new_fd);
          return true;
+      }
+
+      /* Wait until it's safe to serialize */
+      if (netplay->quirks & NETPLAY_QUIRK_INITIALIZATION)
+      {
+         netplay->is_replay = true;
+         netplay->replay_ptr = netplay->self_ptr;
+         netplay->replay_frame_count = netplay->self_frame_count;
+         netplay_wait_and_init_serialization(netplay);
+         netplay->is_replay = false;
       }
 
       /* Start them at the current frame */
@@ -197,6 +207,10 @@ static void netplay_spectate_post_frame(netplay_t *netplay)
          netplay->replay_ptr = netplay->other_ptr;
          netplay->replay_frame_count = netplay->other_frame_count;
 
+         /* Wait until it's safe to serialize */
+         if (netplay->quirks & NETPLAY_QUIRK_INITIALIZATION)
+            netplay_wait_and_init_serialization(netplay);
+
          serial_info.data       = NULL;
          serial_info.data_const = netplay->buffer[netplay->replay_ptr].state;
          serial_info.size       = netplay->state_size;
@@ -205,13 +219,9 @@ static void netplay_spectate_post_frame(netplay_t *netplay)
 
          while (netplay->replay_frame_count < netplay->self_frame_count)
          {
-#if defined(HAVE_THREADS)
             autosave_lock();
-#endif
             core_run();
-#if defined(HAVE_THREADS)
             autosave_unlock();
-#endif
             netplay->replay_ptr = NEXT_PTR(netplay->replay_ptr);
             netplay->replay_frame_count++;
          }
@@ -242,13 +252,9 @@ static void netplay_spectate_post_frame(netplay_t *netplay)
 
          while (netplay->replay_frame_count < netplay->read_frame_count - 1)
          {
-#if defined(HAVE_THREADS)
             autosave_lock();
-#endif
             core_run();
-#if defined(HAVE_THREADS)
             autosave_unlock();
-#endif
 
             netplay->replay_ptr = NEXT_PTR(netplay->replay_ptr);
             netplay->replay_frame_count++;
@@ -268,10 +274,7 @@ static bool netplay_spectate_info_cb(netplay_t* netplay, unsigned frames)
    {
       int i;
       for (i = 0; i < MAX_SPECTATORS; i++)
-      {
          netplay->spectate.fds[i] = -1;
-      }
-
    }
    else
    {

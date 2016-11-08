@@ -70,47 +70,29 @@ struct string_list *file_list;
 static const char* IMAGE_CORE_PREFIX(valid_extensions) = "jpg|jpeg|png|bmp|psd|tga|gif|hdr|pic|ppm|pgm";
 #else
 
+static const char* IMAGE_CORE_PREFIX(valid_extensions) = 1+ /* to remove the first |, the alternative is 25 extra lines of ifdef/etc */
+
 #ifdef HAVE_RJPEG
-#define RJPEG_ARGS "jpg|jpeg"
-
-#ifdef HAVE_RPNG
-#define RJPEG_SEP "|"
-#endif
-
-#else
-#define RJPEG_ARGS
-#define RJPEG_SEP
+"|jpg|jpeg"
 #endif
 
 #ifdef HAVE_RPNG
-#define RPNG_ARGS "png"
-
-#ifdef HAVE_RBMP
-#define RPNG_SEP "|"
-#endif
-#else
-#define RPNG_ARGS
-#define RPNG_SEP
+"|png"
 #endif
 
 #ifdef HAVE_RBMP
-#define RBMP_ARGS "bmp"
-
-#ifdef HAVE_RTGA
-#define RBMP_SEP "|"
-#endif
-#else
-#define RBMP_ARGS
-#define RBMP_SEP
+"|bmp"
 #endif
 
 #ifdef HAVE_RTGA
-#define RTGA_ARGS "tga"
-#else
-#define RTGA_ARGS
+"|tga"
 #endif
 
-static const char* IMAGE_CORE_PREFIX(valid_extensions) = RJPEG_ARGS RJPEG_SEP RPNG_ARGS RPNG_SEP RBMP_ARGS RBMP_SEP RTGA_ARGS;
+#if !defined(HAVE_RJPEG) && !defined(HAVE_RPNG) && !defined(HAVE_RBMP) && !defined(HAVE_RTGA)
+#error "can't build this core with no image formats"
+#endif
+;
+
 #endif
 
 void IMAGE_CORE_PREFIX(retro_get_system_info)(struct retro_system_info *info)

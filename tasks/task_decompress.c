@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -20,29 +21,17 @@
 #include <file/archive_file.h>
 #include <retro_miscellaneous.h>
 #include <retro_stat.h>
+#include <compat/strl.h>
 
 #include "tasks_internal.h"
 #include "../verbosity.h"
 #include "../msg_hash.h"
 
-typedef struct
-{
-   char *source_file;
-   char *subdir;
-   char *target_dir;
-   char *target_file;
-   char *valid_ext;
-
-   char *callback_error;
-
-   file_archive_transfer_t zlib;
-} decompress_state_t;
-
 static int file_decompressed_target_file(const char *name,
       const char *valid_exts,
       const uint8_t *cdata,
       unsigned cmode, uint32_t csize, uint32_t size,
-      uint32_t crc32, void *userdata)
+      uint32_t crc32, struct archive_extract_userdata *userdata)
 {
    /* TODO/FIXME */
    return 0;
@@ -52,22 +41,23 @@ static int file_decompressed_subdir(const char *name,
       const char *valid_exts,
       const uint8_t *cdata,
       unsigned cmode, uint32_t csize,uint32_t size,
-      uint32_t crc32, void *userdata)
+      uint32_t crc32, struct archive_extract_userdata *userdata)
 {
-   char path_dir[PATH_MAX_LENGTH]  = {0};
-   char path[PATH_MAX_LENGTH]      = {0};
-   decompress_state_t         *dec = (decompress_state_t*)userdata;
+   char path_dir[PATH_MAX_LENGTH];
+   char path[PATH_MAX_LENGTH];
+
+   path_dir[0] = path[0] = '\0';
 
    /* Ignore directories. */
    if (name[strlen(name) - 1] == '/' || name[strlen(name) - 1] == '\\')
       goto next_file;
 
-   if (strstr(name, dec->subdir) != name)
+   if (strstr(name, userdata->dec->subdir) != name)
       return 1;
 
-   name += strlen(dec->subdir) + 1;
+   name += strlen(userdata->dec->subdir) + 1;
 
-   fill_pathname_join(path, dec->target_dir, name, sizeof(path));
+   fill_pathname_join(path, userdata->dec->target_dir, name, sizeof(path));
    fill_pathname_basedir(path_dir, path, sizeof(path_dir));
 
    /* Make directory */
@@ -84,8 +74,8 @@ next_file:
    return 1;
 
 error:
-   dec->callback_error = (char*)malloc(PATH_MAX_LENGTH);
-   snprintf(dec->callback_error,
+   userdata->dec->callback_error = (char*)malloc(PATH_MAX_LENGTH);
+   snprintf(userdata->dec->callback_error,
          PATH_MAX_LENGTH, "Failed to deflate %s.\n", path);
 
    return 0;
@@ -93,10 +83,12 @@ error:
 
 static int file_decompressed(const char *name, const char *valid_exts,
    const uint8_t *cdata, unsigned cmode, uint32_t csize, uint32_t size,
-   uint32_t crc32, void *userdata)
+   uint32_t crc32, struct archive_extract_userdata *userdata)
 {
-   char path[PATH_MAX_LENGTH] = {0};
-   decompress_state_t    *dec = (decompress_state_t*)userdata;
+   char path[PATH_MAX_LENGTH];
+   decompress_state_t    *dec = userdata->dec;
+
+   path[0] = '\0';
 
    /* Ignore directories. */
    if (name[strlen(name) - 1] == '/' || name[strlen(name) - 1] == '\\')
@@ -140,7 +132,7 @@ static void task_decompress_handler_finished(retro_task_t *task,
       free(dec->source_file);
    else
    {
-      decompress_task_data_t *data = 
+      decompress_task_data_t *data =
          (decompress_task_data_t*)calloc(1, sizeof(*data));
 
       data->source_file = dec->source_file;
@@ -157,18 +149,24 @@ static void task_decompress_handler_finished(retro_task_t *task,
 
 static void task_decompress_handler(retro_task_t *task)
 {
-   bool retdec             = false;
-   decompress_state_t *dec = (decompress_state_t*)task->state;
-   int ret                 = file_archive_parse_file_iterate(&dec->zlib,
-         &retdec, dec->source_file,
-         dec->valid_ext, file_decompressed, dec);
+   int ret;
+   bool retdec                              = false;
+   struct archive_extract_userdata userdata = {{0}};
+   decompress_state_t *dec                  = (decompress_state_t*)task->state;
 
-   task->progress = file_archive_parse_file_progress(&dec->zlib);
+   userdata.dec            = dec;
+   strlcpy(userdata.archive_path, dec->source_file, sizeof(userdata.archive_path));
+
+   ret                     = file_archive_parse_file_iterate(&dec->archive,
+         &retdec, dec->source_file,
+         dec->valid_ext, file_decompressed, &userdata);
+
+   task->progress = file_archive_parse_file_progress(&dec->archive);
 
    if (task->cancelled || ret != 0)
    {
       task->error = dec->callback_error;
-      file_archive_parse_file_iterate_stop(&dec->zlib);
+      file_archive_parse_file_iterate_stop(&dec->archive);
 
       task_decompress_handler_finished(task, dec);
    }
@@ -177,17 +175,23 @@ static void task_decompress_handler(retro_task_t *task)
 static void task_decompress_handler_target_file(retro_task_t *task)
 {
    bool retdec;
-   decompress_state_t *dec = (decompress_state_t*)task->state;
-   int ret = file_archive_parse_file_iterate(&dec->zlib,
-         &retdec, dec->source_file,
-         dec->valid_ext, file_decompressed_target_file, dec);
+   int ret;
+   struct archive_extract_userdata userdata = {{0}};
+   decompress_state_t *dec                  = (decompress_state_t*)task->state;
 
-   task->progress = file_archive_parse_file_progress(&dec->zlib);
+   strlcpy(userdata.archive_path,
+         dec->source_file, sizeof(userdata.archive_path));
+
+   ret = file_archive_parse_file_iterate(&dec->archive,
+         &retdec, dec->source_file,
+         dec->valid_ext, file_decompressed_target_file, &userdata);
+
+   task->progress = file_archive_parse_file_progress(&dec->archive);
 
    if (task->cancelled || ret != 0)
    {
       task->error = dec->callback_error;
-      file_archive_parse_file_iterate_stop(&dec->zlib);
+      file_archive_parse_file_iterate_stop(&dec->archive);
 
       task_decompress_handler_finished(task, dec);
    }
@@ -195,18 +199,24 @@ static void task_decompress_handler_target_file(retro_task_t *task)
 
 static void task_decompress_handler_subdir(retro_task_t *task)
 {
+   int ret;
    bool retdec;
    decompress_state_t *dec = (decompress_state_t*)task->state;
-   int ret = file_archive_parse_file_iterate(&dec->zlib,
-         &retdec, dec->source_file,
-         dec->valid_ext, file_decompressed_subdir, dec);
+   struct archive_extract_userdata userdata = {{0}};
 
-   task->progress = file_archive_parse_file_progress(&dec->zlib);
+   userdata.dec            = dec;
+   strlcpy(userdata.archive_path, dec->source_file, sizeof(userdata.archive_path));
+
+   ret                     = file_archive_parse_file_iterate(&dec->archive,
+         &retdec, dec->source_file,
+         dec->valid_ext, file_decompressed_subdir, &userdata);
+
+   task->progress          = file_archive_parse_file_progress(&dec->archive);
 
    if (task->cancelled || ret != 0)
    {
       task->error = dec->callback_error;
-      file_archive_parse_file_iterate_stop(&dec->zlib);
+      file_archive_parse_file_iterate_stop(&dec->archive);
 
       task_decompress_handler_finished(task, dec);
    }
@@ -244,9 +254,11 @@ bool task_push_decompress(
       retro_task_callback_t cb,
       void *user_data)
 {
-   char tmp[PATH_MAX_LENGTH]  = {0};
+   char tmp[PATH_MAX_LENGTH];
    decompress_state_t *s      = NULL;
    retro_task_t *t            = NULL;
+
+   tmp[0] = '\0';
 
    if (string_is_empty(target_dir) || string_is_empty(source_file))
    {
@@ -256,8 +268,8 @@ bool task_push_decompress(
    }
 
    /* ZIP or APK only */
-   if (!path_file_exists(source_file) || 
-         msg_hash_to_file_type(msg_hash_calculate(path_get_extension(source_file))) 
+   if (!path_file_exists(source_file) ||
+         msg_hash_to_file_type(msg_hash_calculate(path_get_extension(source_file)))
          != FILE_TYPE_COMPRESSED)
    {
       RARCH_WARN("[decompress] File '%s' does not exist or is not a compressed file.\n",
@@ -286,7 +298,7 @@ bool task_push_decompress(
    s->target_dir  = strdup(target_dir);
 
    s->valid_ext   = valid_ext ? strdup(valid_ext) : NULL;
-   s->zlib.type   = ZLIB_TRANSFER_INIT;
+   s->archive.type   = ARCHIVE_TRANSFER_INIT;
 
    t              = (retro_task_t*)calloc(1, sizeof(*t));
 

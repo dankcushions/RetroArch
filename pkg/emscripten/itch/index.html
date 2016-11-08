@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
    <meta charset="utf-8">
+   <base target="_parent" />
    <title>RetroArch Web Player</title>
    <meta name="viewport" content="width=device-width, initial-scale=1">
-   <base target="_parent" />
    <!-- Bootstrap core CSS -->
    <link href="https://cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.0.0-alpha.3/css/bootstrap.min.css" rel="stylesheet" type="text/css">
     <!-- Font Awesome -->
@@ -14,19 +14,11 @@
    
    <link href="itch.css" rel="stylesheet" type="text/css">
    <link rel="shortcut icon" href="https://buildbot.libretro.com/web/media/icon_dark.ico" />
-   
 </head>
 <body>   
    <!--Navbar-->
    <nav class="navbar navbar-dark bg-danger">
-
-       <!-- Collapse button-->
-       <button class="navbar-toggler hidden-sm-up" type="button" data-toggle="collapse" data-target="#collapseEx2">
-           <i class="fa fa-bars"></i>
-       </button>
-
        <div class="container">
-
            <!--Collapse content-->
            <div class="collapse navbar-toggleable-xs" id="collapseEx2">
                <!--Navbar Brand-->
@@ -49,15 +41,16 @@
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="fbalpha2012_neo">FB Alpha 2012 NeoGeo</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="fceumm">FCEUmm</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="ffmpeg">FFmpeg</a>-->
-                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="gambatte">Gambatte (Gameboy / Gameboy Color)</a>
-                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="genesis_plus_gx">Genesis Plus GX (Megadrive / Game Gear / Master System)</a>
+                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="gambatte">Gambatte (GB/GBC)</a>
+                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="genesis_plus_gx">Genesis Plus GX (MD / GG / SMS)</a>
+                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="glupen64">GLupeN64 (Nintendo 64)</a>
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="gme">Game Music Emu</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="gpsp">gPSP</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="handy">Handy</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mame2000">MAME 2000</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_lynx">Mednafen Lynx</a>-->
-                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_ngp">Mednafen NeoPop (NeoGeo Pocket)</a>
-                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_pce_fast">Mednafen PCE-Fast (PC Engine / TurboGrafx-16)</a>
+                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_ngp">Mednafen NeoPop (NGP)</a>
+                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_pce_fast">Mednafen PCE-Fast (PC-E/TG-16)</a>
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_pcfx">Mednafen/Beetle PCFX</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_psx">Mednafen/Beetle PSX</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_saturn">Mednafen/Beetle Saturn</a>-->
@@ -65,7 +58,7 @@
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_vb">Mednafen/Beetle Virtual Boy</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mednafen_wswan">Mednafen/Beetle WonderSwan</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="mupen64plus">Mupen64 Plus</a>-->
-                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="nestopia">Nestopia (Nintendo Entertainment System)</a>
+                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="nestopia">Nestopia (NES)</a>
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="nxengine">NX Engine</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="o2em">O2em</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="picodrive">PicoDrive</a>-->
@@ -73,7 +66,7 @@
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="quicknes">QuickNES</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="snes9x2002">Snes9x 2002</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="snes9x2005">Snes9x 2005</a>-->
-                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="snes9x2010">Snes9x 2010 (Super Nintendo Entertainment System)</a>
+                          <a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="snes9x2010">Snes9x 2010 (SNES)</a>
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="snes9x">Snes9x</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="stella">Stella</a>-->
                           <!--<a class="dropdown-item" href="https://libretro.itch.io/retroarch" data-core="tgbdual">TGB Dual</a>-->
@@ -88,6 +81,9 @@
                       </button>
                       <button class="btn btn-danger disabled" id="btnAdd" onclick="document.getElementById('btnRom').click()" title="Add Games" disabled>
                          <span class="fa fa-plus" id="icnAdd"></span> </span> <span class="sr-only"></span>
+                      </button>
+                      <button class="btn btn-danger" id="btnClean" onclick="cleanupStorage();" title="Cleanup">
+                        <span class="fa fa-trash-o" id="icnClean"></span> <span class="sr-only">Cleanup</span>
                       </button>
                       <input class="btn btn-danger disabled" style="display: none" type="file" id="btnRom" name="upload" onclick="document.getElementById('btnAdd').click();" onchange="selectFiles(event.target.files)" multiple />
                       <button class="btn btn-danger disabled" id="btnFullscreen" onclick="Module.requestFullScreen()" title="Fullscreen" disabled>
@@ -132,7 +128,8 @@
    <script src="//cdnjs.cloudflare.com/ajax/libs/tether/1.3.4/js/tether.min.js"></script>
    <script src="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/4.0.0-alpha.3/js/bootstrap.min.js"></script>
    <script src="//cdnjs.cloudflare.com/ajax/libs/dropbox.js/0.10.2/dropbox.min.js"></script>
-   <script src="//wzrd.in/standalone/browserfs@0.6.1"></script>
+   <!--script src="//wzrd.in/standalone/browserfs@0.6.1"></script-->
+   <script src="//bot.libretro.com/web/browserfs.min.js"></script>
    <script src="itch.js"></script>
 </body>
 </html>

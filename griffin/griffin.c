@@ -54,16 +54,21 @@ ALGORITHMS
 /*============================================================
 ARCHIVE FILE
 ============================================================ */
+#include "../libretro-common/file/archive_file.c"
 
 #ifdef HAVE_ZLIB
-#include "../libretro-common/file/archive_file.c"
 #include "../libretro-common/file/archive_file_zlib.c"
+#endif
+
+#ifdef HAVE_7ZIP
+#include "../libretro-common/file/archive_file_7z.c"
 #endif
 
 /*============================================================
 ENCODINGS
 ============================================================ */
 #include "../libretro-common/encodings/encoding_utf.c"
+#include "../libretro-common/encodings/encoding_crc32.c"
 
 /*============================================================
 PERFORMANCE
@@ -114,7 +119,7 @@ CONFIG FILE
 ACHIEVEMENTS
 ============================================================ */
 #if defined(HAVE_CHEEVOS) && defined(HAVE_THREADS)
-#if !defined(HAVE_NETPLAY)
+#if !defined(HAVE_NETWORKING)
 #include "../libretro-common/net/net_http.c"
 #endif
 
@@ -268,6 +273,7 @@ VIDEO DRIVER
 #include "../libretro-common/gfx/math/matrix_3x3.c"
 #include "../libretro-common/gfx/math/vector_2.c"
 #include "../libretro-common/gfx/math/vector_3.c"
+#include "../libretro-common/gfx/math/vector_4.c"
 
 #if defined(GEKKO)
 #ifdef HW_RVL
@@ -299,7 +305,7 @@ VIDEO DRIVER
 #ifdef HAVE_OPENGL
 #include "../gfx/common/gl_common.c"
 #include "../gfx/drivers/gl.c"
-#include "../gfx/drivers/gl_capabilities.c"
+#include "../libretro-common/gfx/gl_capabilities.c"
 #include "../gfx/drivers/gl_renderchains/render_chain_gl_legacy.c"
 
 #ifndef HAVE_PSGL
@@ -331,11 +337,6 @@ VIDEO DRIVER
 #include "../deps/libvita2d/source/vita2d_texture.c"
 #include "../deps/libvita2d/source/vita2d_draw.c"
 #include "../deps/libvita2d/source/utils.c"
-#include "../deps/libvita2d/source/vita2d_font.c"
-#include "../deps/libvita2d/source/vita2d_pgf.c"
-#include "../deps/libvita2d/source/bin_packing_2d.c"
-#include "../deps/libvita2d/source/texture_atlas.c"
-#include "../deps/libvita2d/source/int_htab.c"
 
 #include "../gfx/drivers/vita2d_gfx.c"
 #elif defined(_3DS)
@@ -353,6 +354,7 @@ FONTS
 #include "../gfx/font_driver.c"
 
 #if defined(HAVE_STB_FONT)
+#include "../gfx/drivers_font_renderer/stb_unicode.c"
 #include "../gfx/drivers_font_renderer/stb.c"
 #endif
 
@@ -380,6 +382,11 @@ FONTS
 #include "../gfx/drivers_font/vita2d_font.c"
 #endif
 
+#if defined(_3DS)
+#include "../gfx/drivers_font/ctr_font.c"
+#endif
+
+
 #if defined(HAVE_VULKAN)
 #include "../gfx/drivers_font/vulkan_raster_font.c"
 #endif
@@ -403,9 +410,7 @@ INPUT
 #include "../input/common/x11_input_common.c"
 #endif
 
-#ifdef HAVE_BUILTIN_AUTOCONFIG
 #include "../input/input_autodetect_builtin.c"
-#endif
 
 #if defined(__CELLOS_LV2__)
 #include "../input/drivers/ps3_input.c"
@@ -675,7 +680,6 @@ DYNAMIC
 #include "../libretro-common/dynamic/dylib.c"
 #include "../dynamic.c"
 #include "../gfx/video_filter.c"
-#include "../gfx/video_frame.c"
 #include "../audio/audio_dsp_filter.c"
 
 /*============================================================
@@ -796,6 +800,8 @@ RETROARCH
 ============================================================ */
 #include "../core_impl.c"
 #include "../retroarch.c"
+#include "../dirs.c"
+#include "../paths.c"
 #include "../runloop.c"
 #include "../libretro-common/queues/task_queue.c"
 
@@ -806,14 +812,27 @@ RETROARCH
 #include "../intl/msg_hash_eo.c"
 #include "../intl/msg_hash_fr.c"
 #include "../intl/msg_hash_it.c"
-#include "../intl/msg_hash_jp.c"
+#include "../intl/msg_hash_ja.c"
 #include "../intl/msg_hash_nl.c"
 #include "../intl/msg_hash_pt.c"
 #include "../intl/msg_hash_pl.c"
 #include "../intl/msg_hash_ru.c"
+#include "../intl/msg_hash_vn.c"
+#include "../intl/msg_hash_chs.c"
 #endif
 
 #include "../intl/msg_hash_us.c"
+
+/*============================================================
+WIFI
+============================================================ */
+#include "../wifi/wifi_driver.c"
+
+#include "../wifi/drivers/nullwifi.c"
+
+#ifdef HAVE_LAKKA
+#include "../wifi/drivers/connmanctl.c"
+#endif
 
 /*============================================================
 RECORDING
@@ -842,7 +861,7 @@ THREAD
 /*============================================================
 NETPLAY
 ============================================================ */
-#ifdef HAVE_NETPLAY
+#ifdef HAVE_NETWORKING
 #include "../network/netplay/netplay_net.c"
 #include "../network/netplay/netplay_spectate.c"
 #include "../network/netplay/netplay_common.c"
@@ -860,8 +879,7 @@ NETPLAY
 DATA RUNLOOP
 ============================================================ */
 #include "../tasks/task_content.c"
-#include "../tasks/task_save_ram.c"
-#include "../tasks/task_save_state.c"
+#include "../tasks/task_save.c"
 #include "../tasks/task_image.c"
 #include "../tasks/task_file_transfer.c"
 #ifdef HAVE_ZLIB
@@ -888,6 +906,7 @@ MENU
 #ifdef HAVE_MENU
 #include "../menu/menu_driver.c"
 #include "../menu/menu_input.c"
+#include "../menu/menu_event.c"
 #include "../menu/menu_entries.c"
 #include "../menu/menu_setting.c"
 #include "../menu/menu_cbs.c"
@@ -910,6 +929,7 @@ MENU
 #include "../menu/cbs/menu_cbs_scan.c"
 #include "../menu/cbs/menu_cbs_get_value.c"
 #include "../menu/cbs/menu_cbs_label.c"
+#include "../menu/cbs/menu_cbs_sublabel.c"
 #include "../menu/cbs/menu_cbs_up.c"
 #include "../menu/cbs/menu_cbs_down.c"
 #include "../menu/cbs/menu_cbs_contentlist_switch.c"
@@ -936,6 +956,10 @@ MENU
 #include "../menu/drivers_display/menu_display_vita2d.c"
 #endif
 
+#ifdef _3DS
+#include "../menu/drivers_display/menu_display_ctr.c"
+#endif
+
 #endif
 
 
@@ -943,7 +967,7 @@ MENU
 #include "../menu/drivers/rgui.c"
 #endif
 
-#if defined(HAVE_OPENGL) || defined(HAVE_VITA2D)
+#if defined(HAVE_OPENGL) || defined(HAVE_VITA2D) || defined(_3DS)
 #ifdef HAVE_XMB
 #include "../menu/drivers/xmb.c"
 #endif

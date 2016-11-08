@@ -32,13 +32,17 @@ enum rarch_netplay_ctl_state
 {
    RARCH_NETPLAY_CTL_NONE = 0,
    RARCH_NETPLAY_CTL_FLIP_PLAYERS,
-   RARCH_NETPLAY_CTL_FULLSCREEN_TOGGLE,
    RARCH_NETPLAY_CTL_POST_FRAME,
    RARCH_NETPLAY_CTL_PRE_FRAME,
+   RARCH_NETPLAY_CTL_ENABLE_SERVER,
+   RARCH_NETPLAY_CTL_ENABLE_CLIENT,
+   RARCH_NETPLAY_CTL_DISABLE,
+   RARCH_NETPLAY_CTL_IS_ENABLED,
    RARCH_NETPLAY_CTL_IS_DATA_INITED,
    RARCH_NETPLAY_CTL_PAUSE,
    RARCH_NETPLAY_CTL_UNPAUSE,
-   RARCH_NETPLAY_CTL_LOAD_SAVESTATE
+   RARCH_NETPLAY_CTL_LOAD_SAVESTATE,
+   RARCH_NETPLAY_CTL_DISCONNECT
 };
 
 enum netplay_cmd
@@ -134,6 +138,7 @@ size_t audio_sample_batch_net(const int16_t *data, size_t frames);
  * @cb                   : Libretro callbacks.
  * @spectate             : If true, enable spectator mode.
  * @nick                 : Nickname of user.
+ * @quirks               : Netplay quirks.
  *
  * Creates a new netplay handle. A NULL host means we're 
  * hosting (user 1).
@@ -143,7 +148,7 @@ size_t audio_sample_batch_net(const int16_t *data, size_t frames);
 netplay_t *netplay_new(const char *server,
       uint16_t port, unsigned frames, unsigned check_frames,
       const struct retro_callbacks *cb, bool spectate,
-      const char *nick);
+      const char *nick, uint64_t quirks);
 
 /**
  * netplay_free:
@@ -187,7 +192,7 @@ void netplay_frontend_paused(netplay_t *netplay, bool paused);
 /**
  * netplay_load_savestate
  * @netplay              : pointer to netplay object
- * @serial_info          : the savestate being loaded
+ * @serial_info          : the savestate being loaded, NULL means "load it yourself"
  * @save                 : whether to save the provided serial_info into the frame buffer
  *
  * Inform Netplay of a savestate load and send it to the other side
@@ -195,7 +200,20 @@ void netplay_frontend_paused(netplay_t *netplay, bool paused);
 void netplay_load_savestate(netplay_t *netplay, retro_ctx_serialize_info_t *serial_info, bool save);
 
 /**
- * init_netplay:
+ * netplay_disconnect
+ * @netplay              : pointer to netplay object
+ *
+ * Disconnect netplay.
+ *
+ * Returns: true (1) if successful. At present, cannot fail.
+ **/
+bool netplay_disconnect(netplay_t *netplay);
+
+/**
+ * init_netplay
+ * @is_spectate          : true if running in spectate mode
+ * @server               : server address to connect to (client only)
+ * @port                 : TCP port to host on/connect to
  *
  * Initializes netplay.
  *
@@ -203,7 +221,7 @@ void netplay_load_savestate(netplay_t *netplay, retro_ctx_serialize_info_t *seri
  *
  * Returns: true (1) if successful, otherwise false (0).
  **/
-bool init_netplay(void);
+bool init_netplay(bool is_spectate, const char *server, unsigned port);
 
 void deinit_netplay(void);
 

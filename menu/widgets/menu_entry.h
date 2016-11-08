@@ -45,10 +45,11 @@ enum menu_entry_type
 
 typedef struct menu_entry
 {
-   char  path[PATH_MAX_LENGTH];
-   char label[PATH_MAX_LENGTH];
-   char rich_label[PATH_MAX_LENGTH];
-   char value[PATH_MAX_LENGTH];
+   char  path[255];
+   char label[255];
+   char sublabel[255];
+   char rich_label[255];
+   char value[255];
    size_t entry_idx;
    enum msg_hash_enums enum_idx;
    unsigned idx;
@@ -93,6 +94,8 @@ void menu_entry_pathdir_extensions(uint32_t i, char *s, size_t len);
 void menu_entry_reset(uint32_t i);
 
 void menu_entry_get_rich_label(uint32_t i, char *s, size_t len);
+
+bool menu_entry_get_sublabel(uint32_t i, char *s, size_t len);
 
 void menu_entry_get_value(uint32_t i, void *data, char *s, size_t len);
 

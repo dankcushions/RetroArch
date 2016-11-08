@@ -86,7 +86,7 @@ static int menu_input_key_bind_set_mode_common(
    menu_displaylist_info_t info  = {0};
    struct retro_keybind *keybind = NULL;
    settings_t     *settings      = config_get_ptr();
-   unsigned         index_offset = setting_get_index_offset(setting);
+   unsigned         index_offset = setting->index_offset;
    file_list_t *menu_stack       = menu_entries_get_menu_stack_ptr(0);
 
    menu_navigation_ctl(MENU_NAVIGATION_CTL_GET_SELECTION, &selection);
@@ -216,8 +216,8 @@ static void menu_input_key_bind_poll_bind_state(
       return;
 
    memset(state->state, 0, sizeof(state->state));
-   state->skip = timed_out || input_driver_state(NULL, 0,
-         RETRO_DEVICE_KEYBOARD, 0, RETROK_RETURN);
+   state->skip = timed_out || current_input->input_state(current_input_data, NULL,
+         0, RETRO_DEVICE_KEYBOARD, 0, RETROK_RETURN);
 
    menu_input_key_bind_poll_bind_state_internal(
          joypad, state, port, timed_out);
@@ -243,7 +243,7 @@ bool menu_input_key_bind_set_mode(
    if (menu_input_key_bind_set_mode_common(state, setting) == -1)
       return false;
 
-   index_offset      = setting_get_index_offset(setting);
+   index_offset      = setting->index_offset;
    menu_bind_port    = settings->input.joypad_map[index_offset];
 
    menu_input_key_bind_poll_bind_get_rested_axes(

@@ -846,7 +846,8 @@ static void vulkan_free(void *data)
 
       /* No need to init this since textures are create on-demand. */
       vulkan_deinit_menu(vk);
-      font_driver_free(NULL);
+
+      font_driver_free_osd();
 
       vulkan_deinit_static_resources(vk);
       vulkan_overlay_free(vk);
@@ -1113,12 +1114,7 @@ static void *vulkan_init(const video_info_t *video,
    video_context_driver_input_driver(&inp);
 
    if (settings->video.font_enable)
-   {
-      if (!font_driver_init_first(NULL, NULL, vk, *settings->path.font 
-            ? settings->path.font : NULL, settings->video.font_size, false,
-            FONT_DRIVER_RENDER_VULKAN_API))
-         RARCH_ERR("[Vulkan]: Failed to initialize font renderer.\n");
-   }
+      font_driver_init_osd(vk, false, FONT_DRIVER_RENDER_VULKAN_API);
 
    vulkan_init_readback(vk);
    return vk;
@@ -1496,7 +1492,7 @@ static void vulkan_inject_black_frame(vk_t *vk)
 
    vulkan_image_layout_transition(vk, vk->cmd, chain->backbuffer.image,
          VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
-         VK_ACCESS_TRANSFER_WRITE_BIT, 0,
+         VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_MEMORY_READ_BIT,
          VK_PIPELINE_STAGE_TRANSFER_BIT,
          VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
@@ -1822,7 +1818,7 @@ static bool vulkan_frame(void *data, const void *frame,
             VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             0,
-            0,
+            VK_ACCESS_MEMORY_READ_BIT,
             VK_PIPELINE_STAGE_TRANSFER_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
 
@@ -1836,7 +1832,7 @@ static bool vulkan_frame(void *data, const void *frame,
             VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
             VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT,
-            0,
+            VK_ACCESS_MEMORY_READ_BIT,
             VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT,
             VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT);
    }
@@ -2278,7 +2274,9 @@ static bool vulkan_read_viewport(void *data, uint8_t *buffer)
        * with conversion. */
 
       vk->readback.pending = true;
-      video_driver_cached_frame_render();
+      if (!runloop_ctl(RUNLOOP_CTL_IS_IDLE, NULL))
+         video_driver_cached_frame();
+
       vkQueueWaitIdle(vk->context->queue);
 
       if (!staging->mapped)

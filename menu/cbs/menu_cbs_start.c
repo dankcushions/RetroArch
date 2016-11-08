@@ -272,7 +272,7 @@ static int action_start_core_setting(unsigned type,
 static int action_start_playlist_association(unsigned type, const char *label)
 {
    int found;
-   char new_playlist_cores[PATH_MAX_LENGTH] = {0};
+   char new_playlist_cores[PATH_MAX_LENGTH];
    struct string_list *stnames      = NULL;
    struct string_list *stcores      = NULL;
    core_info_list_t           *list = NULL;
@@ -282,6 +282,8 @@ static int action_start_playlist_association(unsigned type, const char *label)
    core_info_get_list(&list);
    if (!list)
       return -1;
+
+   new_playlist_cores[0] = '\0';
 
    stnames = string_split(settings->playlist_names, ";");
    stcores = string_split(settings->playlist_cores, ";");
@@ -312,7 +314,9 @@ static int action_start_video_resolution(unsigned type, const char *label)
 
    if (video_driver_get_video_output_size(&width, &height))
    {
-      char msg[PATH_MAX_LENGTH] = {0};
+      char msg[PATH_MAX_LENGTH];
+
+      msg[0] = '\0';
 
       video_driver_set_video_mode(width, height, true);
 

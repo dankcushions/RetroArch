@@ -2,6 +2,7 @@
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
  *  Copyright (C) 2012-2015 - Michael Lelli
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -389,21 +390,18 @@ static void rgui_render(void *data)
    size_t i, end, fb_pitch, old_start;
    unsigned fb_width, fb_height;
    int bottom;
+   char title[255];
+   char title_buf[255];
+   char title_msg[64];
+   char msg[255];
    bool msg_force                 = false;
    uint64_t *frame_count          = NULL;
-   char title[256]                = {0};
-   char title_buf[256]            = {0};
-   char title_msg[64]             = {0};
-   char msg[PATH_MAX_LENGTH]      = {0};
    settings_t *settings           = config_get_ptr();
    rgui_t *rgui                   = (rgui_t*)data;
 
    frame_count = video_driver_get_frame_count_ptr();
 
-   msg[0]       = '\0';
-   title[0]     = '\0';
-   title_buf[0] = '\0';
-   title_msg[0] = '\0';
+   msg[0] = title[0] = title_buf[0] = title_msg[0] = '\0';
 
    if (!rgui)
       return;
@@ -516,11 +514,20 @@ static void rgui_render(void *data)
    normal_color = NORMAL_COLOR(settings);
 
    if (menu_entries_ctl(MENU_ENTRIES_CTL_SHOW_BACK, NULL))
+   {
+      char back_buf[32];
+      char back_msg[32];
+
+      back_buf[0] = back_msg[0] = '\0';
+
+      strlcpy(back_buf, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_BASIC_MENU_CONTROLS_BACK), sizeof(back_buf));
+      strlcpy(back_msg, string_to_upper(back_buf), sizeof(back_msg));
       blit_line(
             RGUI_TERM_START_X(fb_width),
             RGUI_TERM_START_X(fb_width),
-            msg_hash_to_str(MENU_ENUM_LABEL_VALUE_BACK),
+            back_msg,
             TITLE_COLOR(settings));
+   }
 
    strlcpy(title_buf, string_to_upper(title_buf), sizeof(title_buf));
 
@@ -539,7 +546,9 @@ static void rgui_render(void *data)
    if (settings->menu.timedate_enable)
    {
       menu_display_ctx_datetime_t datetime;
-      char timedate[PATH_MAX_LENGTH] = {0};
+      char timedate[255];
+
+      timedate[0] = '\0';
 
       datetime.s         = timedate;
       datetime.len       = sizeof(timedate);
@@ -562,11 +571,11 @@ static void rgui_render(void *data)
    {
       menu_animation_ctx_ticker_t ticker;
       size_t selection;
-      char entry_path[PATH_MAX_LENGTH]      = {0};
-      char entry_value[PATH_MAX_LENGTH]     = {0};
-      char message[PATH_MAX_LENGTH]         = {0};
-      char entry_title_buf[PATH_MAX_LENGTH] = {0};
-      char type_str_buf[PATH_MAX_LENGTH]    = {0};
+      char entry_path[255];
+      char entry_value[255];
+      char message[255];
+      char entry_title_buf[255];
+      char type_str_buf[255];
       unsigned                entry_spacing = menu_entry_get_spacing(i);
       bool                entry_selected    = menu_entry_is_currently_selected(i);
       

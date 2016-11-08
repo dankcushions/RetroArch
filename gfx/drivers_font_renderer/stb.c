@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2015-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -23,13 +23,16 @@
 #include "../font_driver.h"
 #include "../../verbosity.h"
 
+#ifndef STB_TRUETYPE_IMPLEMENTATION
 #define STB_TRUETYPE_IMPLEMENTATION
 #define STB_RECT_PACK_IMPLEMENTATION
 #define STBTT_STATIC
+#define STBRP_STATIC
 #define static static INLINE
 #include "../../deps/stb/stb_rect_pack.h"
 #include "../../deps/stb/stb_truetype.h"
 #undef static
+#endif
 
 typedef struct
 {
@@ -38,7 +41,7 @@ typedef struct
    struct font_glyph glyphs[256];
 } stb_font_renderer_t;
 
-static const struct font_atlas *font_renderer_stb_get_atlas(void *data)
+static struct font_atlas *font_renderer_stb_get_atlas(void *data)
 {
    stb_font_renderer_t *self = (stb_font_renderer_t*)data;
    return &self->atlas;
@@ -88,6 +91,8 @@ static bool font_renderer_stb_create_atlas(stb_font_renderer_t *self,
 
    stbtt_PackFontRange(&pc, font_data, 0, font_size, 0, 256, chardata);
    stbtt_PackEnd(&pc);
+
+   self->atlas.dirty = true;
 
    for (i = 0; i < 256; ++i)
    {
@@ -192,6 +197,14 @@ static const char *font_renderer_stb_get_default_font(void)
       "/system/fonts/DroidSansMono.ttf",
       "/system/fonts/CutiveMono.ttf",
       "/system/fonts/DroidSans.ttf",
+#elif defined(VITA)
+      "vs0:data/external/font/pvf/c041056ts.ttf",
+      "vs0:data/external/font/pvf/d013013ds.ttf",
+      "vs0:data/external/font/pvf/e046323ms.ttf",
+      "vs0:data/external/font/pvf/e046323ts.ttf",
+      "vs0:data/external/font/pvf/k006004ds.ttf",
+      "vs0:data/external/font/pvf/n023055ms.ttf",
+      "vs0:data/external/font/pvf/n023055ts.ttf",
 #else
       "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
       "/usr/share/fonts/TTF/DejaVuSans.ttf",

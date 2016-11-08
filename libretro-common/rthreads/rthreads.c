@@ -137,7 +137,14 @@ sthread_t *sthread_create(void (*thread_func)(void*), void *userdata)
    thread->thread = CreateThread(NULL, 0, thread_wrap, data, 0, NULL);
    thread_created = !!thread->thread;
 #else
+#if defined(VITA)
+   pthread_attr_t thread_attr;
+   pthread_attr_init(&thread_attr);
+   pthread_attr_setstacksize(&thread_attr , 0x10000 );
+   thread_created = pthread_create(&thread->id, &thread_attr, thread_wrap, data) == 0;
+#else
    thread_created = pthread_create(&thread->id, NULL, thread_wrap, data) == 0;
+#endif
 #endif
 
    if (!thread_created)
@@ -199,11 +206,6 @@ void sthread_join(sthread_t *thread)
 /**
  * sthread_isself:
  * @thread                  : pointer to thread object
- *
- * Join with a terminated thread. Waits for the thread specified by
- * @thread to terminate. If that thread has already terminated, then
- * it will return immediately. The thread specified by @thread must
- * be joinable.
  *
  * Returns: true (1) if calling thread is the specified thread
  */
@@ -472,3 +474,41 @@ bool scond_wait_timeout(scond_t *cond, slock_t *lock, int64_t timeout_us)
    return (ret == 0);
 #endif
 }
+
+#ifdef HAVE_THREAD_STORAGE
+bool sthread_tls_create(sthread_tls_t *tls)
+{
+#ifdef USE_WIN32_THREADS
+   return (*tls = TlsAlloc()) != TLS_OUT_OF_INDEXES;
+#else
+   return pthread_key_create((pthread_key_t*)tls, NULL) == 0;
+#endif
+}
+
+bool sthread_tls_delete(sthread_tls_t *tls)
+{
+#ifdef USE_WIN32_THREADS
+   return TlsFree(*tls) != 0;
+#else
+   return pthread_key_delete(*tls) == 0;
+#endif
+}
+
+void *sthread_tls_get(sthread_tls_t *tls)
+{
+#ifdef USE_WIN32_THREADS
+   return TlsGetValue(*tls);
+#else
+   return pthread_getspecific(*tls);
+#endif
+}
+
+bool sthread_tls_set(sthread_tls_t *tls, const void *data)
+{
+#ifdef USE_WIN32_THREADS
+   return TlsSetValue(*tls, (void*)data) != 0;
+#else
+   return pthread_setspecific(*tls, data) == 0;
+#endif
+}
+#endif

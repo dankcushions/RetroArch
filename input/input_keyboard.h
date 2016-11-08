@@ -77,6 +77,8 @@ typedef struct input_keyboard_ctx_wait
 void input_keyboard_event(bool down, unsigned code, uint32_t character,
       uint16_t mod, unsigned device);
 
+bool input_keyboard_line_append(const char *word);
+
 /**
  * input_keyboard_start_line:
  * @userdata                 : Userdata.
@@ -95,6 +97,8 @@ const char **input_keyboard_start_line(void *userdata,
 
 
 bool input_keyboard_ctl(enum rarch_input_keyboard_ctl_state state, void *data);
+
+bool input_keyboard_return_pressed(void);
 
 RETRO_END_DECLS
 

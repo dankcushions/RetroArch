@@ -125,21 +125,7 @@ int menu_action_handle_setting(rarch_setting_t *setting,
 
 enum setting_type menu_setting_get_browser_selection_type(rarch_setting_t *setting);
 
-enum msg_hash_enums menu_setting_get_enum_idx(rarch_setting_t *setting);
-
-const char *menu_setting_get_values(rarch_setting_t *setting);
-
-const char *menu_setting_get_name(rarch_setting_t *setting);
-
-const char *menu_setting_get_short_description(rarch_setting_t *setting);
-
-const char *menu_setting_get_parent_group(rarch_setting_t *setting);
-
-uint32_t menu_setting_get_index(rarch_setting_t *setting);
-
 void *setting_get_ptr(rarch_setting_t *setting);
-
-void menu_settings_list_increment(rarch_setting_t **list);
 
 void general_write_handler(void *data);
 
@@ -167,6 +153,11 @@ void settings_data_list_current_add_free_flags(
       unsigned values);
 
 void menu_settings_list_current_add_enum_idx(
+      rarch_setting_t **list,
+      rarch_setting_info_t *list_info,
+      enum msg_hash_enums enum_idx);
+
+void menu_settings_list_current_add_enum_value_idx(
       rarch_setting_t **list,
       rarch_setting_info_t *list_info,
       enum msg_hash_enums enum_idx);

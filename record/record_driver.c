@@ -35,7 +35,6 @@
 #include "../msg_hash.h"
 #include "../list_special.h"
 
-static bool recording_enable;
 
 static const record_driver_t *record_drivers[] = {
 #ifdef HAVE_FFMPEG
@@ -45,8 +44,15 @@ static const record_driver_t *record_drivers[] = {
    NULL,
 };
 
-static const record_driver_t *recording_driver;
-static void *recording_data;
+unsigned    recording_width                    = 0;
+unsigned    recording_height                   = 0;
+size_t      recording_gpu_width                = 0;
+size_t      recording_gpu_height               = 0;
+static bool recording_enable                   = false;
+static bool recording_use_output_dir           = false;
+
+static const record_driver_t *recording_driver = NULL;
+static void *recording_data                    = NULL;
 
 /**
  * record_driver_find_ident:
@@ -180,7 +186,6 @@ void recording_dump_frame(const void *data, unsigned width,
       unsigned height, size_t pitch)
 {
    struct ffemu_video_data ffemu_data = {0};
-   global_t *global = global_get_ptr();
 
    if (!recording_data)
       return;
@@ -208,8 +213,8 @@ void recording_dump_frame(const void *data, unsigned width,
       }
 
       /* User has resized. We kinda have a problem now. */
-      if (vp.width != global->record.gpu_width ||
-            vp.height != global->record.gpu_height)
+      if (  vp.width  != recording_gpu_width ||
+            vp.height != recording_gpu_height)
       {
          RARCH_WARN("%s\n", msg_hash_to_str(MSG_RECORDING_TERMINATED_DUE_TO_RESIZE));
 
@@ -230,9 +235,9 @@ void recording_dump_frame(const void *data, unsigned width,
       if (!video_driver_read_viewport(gpu_buf))
          return;
 
-      ffemu_data.pitch  = global->record.gpu_width * 3;
-      ffemu_data.width  = global->record.gpu_width;
-      ffemu_data.height = global->record.gpu_height;
+      ffemu_data.pitch  = recording_gpu_width * 3;
+      ffemu_data.width  = recording_gpu_width;
+      ffemu_data.height = recording_gpu_height;
       ffemu_data.data   = gpu_buf + (ffemu_data.height - 1) * ffemu_data.pitch;
 
       ffemu_data.pitch  = -ffemu_data.pitch;
@@ -297,15 +302,17 @@ void recording_push_audio(const int16_t *data, size_t samples)
  **/
 bool recording_init(void)
 {
-   char recording_file[PATH_MAX_LENGTH] = {0};
+   char recording_file[PATH_MAX_LENGTH];
    struct ffemu_params params           = {0};
-   global_t *global                     = global_get_ptr();
-   settings_t *settings                 = config_get_ptr();
    struct retro_system_av_info *av_info = video_viewport_get_system_av_info();
    bool *recording_enabled              = recording_is_enabled();
+   settings_t *settings                 = config_get_ptr();
+   global_t *global                     = global_get_ptr();
 
    if (!*recording_enabled)
       return false;
+
+   recording_file[0] = '\0';
 
    if (rarch_ctl(RARCH_CTL_IS_DUMMY_CORE, NULL))
    {
@@ -329,7 +336,7 @@ bool recording_init(void)
 
    strlcpy(recording_file, global->record.path, sizeof(recording_file));
 
-   if (global->record.use_output_dir)
+   if (recording_use_output_dir)
       fill_pathname_join(recording_file,
             global->record.output_dir,
             global->record.path, sizeof(recording_file));
@@ -375,8 +382,8 @@ bool recording_init(void)
          params.aspect_ratio  = (float)vp.width / vp.height;
 
       params.pix_fmt             = FFEMU_PIX_BGR24;
-      global->record.gpu_width   = vp.width;
-      global->record.gpu_height  = vp.height;
+      recording_gpu_width        = vp.width;
+      recording_gpu_height       = vp.height;
 
       RARCH_LOG("%s %u x %u\n", msg_hash_to_str(MSG_DETECTED_VIEWPORT_OF),
             vp.width, vp.height);
@@ -387,10 +394,10 @@ bool recording_init(void)
    }
    else
    {
-      if (global->record.width || global->record.height)
+      if (recording_width || recording_height)
       {
-         params.out_width  = global->record.width;
-         params.out_height = global->record.height;
+         params.out_width  = recording_width;
+         params.out_height = recording_height;
       }
 
       if (settings->video.force_aspect &&
@@ -449,4 +456,28 @@ void recording_driver_clear_data_ptr(void)
 void recording_driver_set_data_ptr(void *data)
 {
    recording_data = data;
+}
+
+bool *recording_driver_get_use_output_dir_ptr(void)
+{
+   return &recording_use_output_dir;
+}
+
+unsigned *recording_driver_get_width(void)
+{
+   return &recording_width;
+}
+
+unsigned *recording_driver_get_height(void)
+{
+   return &recording_height;
+}
+
+void recording_driver_free_state(void)
+{
+   recording_use_output_dir = false;
+   recording_gpu_width      = 0;
+   recording_gpu_height     = 0;
+   recording_width          = 0;
+   recording_height         = 0;
 }

@@ -25,6 +25,7 @@
 
 #include <retro_assert.h>
 #include <compat/posix_string.h>
+#include <compat/strl.h>
 #include <file/file_path.h>
 #include <formats/image.h>
 #include <gfx/math/matrix_4x4.h>
@@ -128,8 +129,13 @@ static void nk_menu_context_reset_textures(nk_menu_handle_t *nk,
 
    for (i = 0; i < NK_TEXTURE_LAST; i++)
    {
-      struct texture_image ti     = {0};
-      char path[PATH_MAX_LENGTH]  = {0};
+      struct texture_image ti;
+      char path[PATH_MAX_LENGTH];
+
+      ti.width    = 0;
+      ti.height   = 0;
+      ti.pixels   = NULL;
+      path[0]     = '\0';
 
       switch(i)
       {
@@ -221,6 +227,8 @@ static void nk_menu_layout(nk_menu_handle_t *nk)
 
 static void nk_menu_init_device(nk_menu_handle_t *nk)
 {
+   const void *image;
+   int w, h;
    char buf[PATH_MAX_LENGTH] = {0};
 
    fill_pathname_join(buf, nk->assets_directory,
@@ -230,10 +238,9 @@ static void nk_menu_init_device(nk_menu_handle_t *nk)
    nk_alloc.alloc = nk_common_mem_alloc;
    nk_alloc.free = nk_common_mem_free;
    nk_buffer_init(&device.cmds, &nk_alloc, 1024);
-   const void *image; int w, h;
    nk_font_atlas_init_default(&atlas);
    nk_font_atlas_begin(&atlas);
-   font = nk_font_atlas_add_default(&atlas, 13.0f, NULL);
+   font  = nk_font_atlas_add_default(&atlas, 13.0f, NULL);
    image = nk_font_atlas_bake(&atlas, &w, &h, NK_FONT_ATLAS_RGBA32);
    device_upload_atlas(&device, image, w, h);
    nk_font_atlas_end(&atlas, nk_handle_id((int)device.font_tex), &device.null);
@@ -337,7 +344,9 @@ static void nk_menu_context_destroy(void *data)
    for (i = 0; i < NK_TEXTURE_LAST; i++)
       video_driver_texture_unload((uintptr_t*)&nk->textures.list[i]);
 
+#if 0
    menu_display_font_main_deinit();
+#endif
    wimp_context_bg_destroy(nk);
 }
 

@@ -107,6 +107,7 @@ static bool rwebinput_key_pressed(void *data, int key)
    settings_t         *settings = config_get_ptr();
    return rwebinput_is_pressed(rwebinput, settings->input.binds[0], key);
 }
+
 static int16_t rwebinput_mouse_state(rwebinput_input_t *rwebinput, unsigned id)
 {
    switch (id)
@@ -149,8 +150,9 @@ static int16_t rwebinput_input_state(void *data, const struct retro_keybind **bi
    switch (device)
    {
       case RETRO_DEVICE_JOYPAD:
-         return rwebinput_is_pressed(rwebinput, binds[port], id);
-
+         if (binds[port] && binds[port][id].valid)
+            return rwebinput_is_pressed(rwebinput, binds[port], id);
+         break;
       case RETRO_DEVICE_ANALOG:
          return rwebinput_analog_pressed(rwebinput, binds[port], idx, id);
 
@@ -254,7 +256,6 @@ input_driver_t input_rwebinput = {
    rwebinput_input_init,
    rwebinput_input_poll,
    rwebinput_input_state,
-   rwebinput_key_pressed,
    rwebinput_meta_key_pressed,
    rwebinput_input_free,
    NULL,

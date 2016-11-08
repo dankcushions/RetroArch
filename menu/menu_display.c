@@ -1,5 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2014-2016 - Jean-André Santoni
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -62,6 +64,9 @@ static menu_display_ctx_driver_t *menu_display_ctx_drivers[] = {
 #ifdef HAVE_VITA2D
    &menu_display_ctx_vita2d,
 #endif
+#ifdef _3DS
+   &menu_display_ctx_ctr,
+#endif
    &menu_display_ctx_null,
    NULL,
 };
@@ -113,6 +118,10 @@ static bool menu_display_check_compatibility(
          if (string_is_equal(video_driver, "vita2d"))
             return true;
          break;
+      case MENU_VIDEO_DRIVER_CTR:
+         if (string_is_equal(video_driver, "ctr"))
+            return true;
+         break;
    }
 
    return false;
@@ -156,13 +165,11 @@ static video_coord_array_t menu_disp_ca;
 static unsigned menu_display_framebuf_width      = 0;
 static unsigned menu_display_framebuf_height     = 0;
 static size_t menu_display_framebuf_pitch        = 0;
-static int menu_display_font_size                = 0;
 static unsigned menu_display_header_height       = 0;
 static bool menu_display_msg_force               = false;
 static bool menu_display_font_alloc_framebuf     = false;
 static bool menu_display_framebuf_dirty          = false;
 static const uint8_t *menu_display_font_framebuf = NULL;
-static void *menu_display_font_buf               = NULL;
 static msg_queue_t *menu_display_msg_queue       = NULL;
 static menu_display_ctx_driver_t *menu_disp      = NULL;
 
@@ -180,64 +187,50 @@ void menu_display_blend_end(void)
    menu_disp->blend_end();
 }
 
-void menu_display_font_main_deinit(void)
+void menu_display_font_free(font_data_t *font)
 {
-   if (menu_display_font_buf)
-      font_driver_free(menu_display_font_buf);
-   menu_display_font_buf  = NULL;
-   menu_display_font_size = 0;
+   font_driver_free(font);
 }
 
-bool menu_display_font(enum application_special_type type)
+font_data_t *menu_display_font(enum application_special_type type, float font_size)
 {
    menu_display_ctx_font_t font_info;
-   char fontpath[PATH_MAX_LENGTH]  = {0};
-   int                   font_size = menu_display_get_font_size();
+   char fontpath[PATH_MAX_LENGTH];
+
+   fontpath[0] = '\0';
 
    fill_pathname_application_special(fontpath, sizeof(fontpath), type);
 
    font_info.path = fontpath;
    font_info.size = font_size;
 
-   if (!menu_display_font_main_init(&font_info))
-   {
-      RARCH_WARN("Failed to load font.");
-      return false;
-   }
-
-   return true;
+   return menu_display_font_main_init(&font_info);
 }
 
-bool menu_display_font_main_init(menu_display_ctx_font_t *font)
+font_data_t *menu_display_font_main_init(menu_display_ctx_font_t *font)
 {
-   menu_display_font_main_deinit();
+   font_data_t *font_data = NULL;
+
    if (!font || !menu_disp)
-      return false;
+      return NULL;
 
-   if (!menu_disp->font_init_first)
-      return false;
-
-   if (!menu_disp->font_init_first(&menu_display_font_buf,
+   if (!menu_disp->font_init_first((void**)&font_data,
             video_driver_get_ptr(false),
             font->path, font->size))
-      return false;
+      return NULL;
 
-   menu_display_font_size = font->size;
-   return true;
+   return font_data;
 }
 
-void menu_display_font_bind_block(void *block)
+void menu_display_font_bind_block(font_data_t *font, void *block)
 {
-   font_driver_bind_block(menu_display_font_buf, block);
+   font_driver_bind_block(font, block);
 }
 
-bool menu_display_font_flush_block(void)
+bool menu_display_font_flush_block(font_data_t *font)
 {
-   if (!menu_display_font_buf)
-      return false;
-
-   font_driver_flush(menu_display_font_buf);
-   font_driver_bind_block(menu_display_font_buf, NULL);
+   font_driver_flush(font);
+   font_driver_bind_block(font, NULL);
    return true;
 }
 
@@ -252,6 +245,7 @@ void menu_display_deinit(void)
 {
    if (menu_display_msg_queue)
       msg_queue_free(menu_display_msg_queue);
+
    video_coord_array_free(&menu_disp_ca);
    menu_display_msg_queue       = NULL;
    menu_display_msg_force       = false;
@@ -264,8 +258,8 @@ void menu_display_deinit(void)
 
 bool menu_display_init(void)
 {
-   retro_assert((menu_display_msg_queue = msg_queue_new(8)) != NULL);
-   menu_disp_ca.allocated              =  0;
+   menu_display_msg_queue  = msg_queue_new(8);
+   menu_disp_ca.allocated  =  0;
    return true;
 }
 
@@ -277,16 +271,6 @@ void menu_display_coords_array_reset(void)
 video_coord_array_t *menu_display_get_coords_array(void)
 {
    return &menu_disp_ca;
-}
-
-void *menu_display_get_font_buffer(void)
-{
-   return menu_display_font_buf;
-}
-
-void menu_display_set_font_buffer(void *buffer)
-{
-   menu_display_font_buf = buffer;
 }
 
 const uint8_t *menu_display_get_font_framebuffer(void)
@@ -326,7 +310,9 @@ bool menu_display_libretro(void)
       return true;
    }
 
-   return video_driver_cached_frame_render();
+   if (runloop_ctl(RUNLOOP_CTL_IS_IDLE, NULL))
+      return true; /* Maybe return false here for indication of idleness? */
+   return video_driver_cached_frame();
 }
 
 void menu_display_set_width(unsigned width)
@@ -357,16 +343,6 @@ void menu_display_set_header_height(unsigned height)
 unsigned menu_display_get_header_height(void)
 {
    return menu_display_header_height;
-}
-
-unsigned menu_display_get_font_size(void)
-{
-   return menu_display_font_size;
-}
-
-void menu_display_set_font_size(unsigned size)
-{
-   menu_display_font_size = size;
 }
 
 size_t menu_display_get_framebuffer_pitch(void)
@@ -570,6 +546,69 @@ void menu_display_draw_gradient(menu_display_ctx_draw_t *draw)
    menu_display_draw(draw);
 }
 
+void menu_display_draw_quad(
+      int x, int y, unsigned w, unsigned h,
+      unsigned width, unsigned height,
+      float *color)
+{
+   menu_display_ctx_draw_t draw;
+   struct video_coords coords;
+
+   coords.vertices      = 4;
+   coords.vertex        = NULL;
+   coords.tex_coord     = NULL;
+   coords.lut_tex_coord = NULL;
+   coords.color         = color;
+
+   menu_display_blend_begin();
+
+   draw.x           = x;
+   draw.y           = (int)height - y - (int)h;
+   draw.width       = w;
+   draw.height      = h;
+   draw.coords      = &coords;
+   draw.matrix_data = NULL;
+   draw.texture     = menu_display_white_texture;
+   draw.prim_type   = MENU_DISPLAY_PRIM_TRIANGLESTRIP;
+   draw.pipeline.id = 0;
+
+   menu_display_draw(&draw);
+   menu_display_blend_end();
+}
+
+void menu_display_draw_texture(
+      int x, int y, unsigned w, unsigned h,
+      unsigned width, unsigned height,
+      float *color, uintptr_t texture)
+{
+   menu_display_ctx_draw_t draw;
+   menu_display_ctx_rotate_draw_t rotate_draw;
+   struct video_coords coords;
+   math_matrix_4x4 mymat;
+   rotate_draw.matrix       = &mymat;
+   rotate_draw.rotation     = 0.0;
+   rotate_draw.scale_x      = 1.0;
+   rotate_draw.scale_y      = 1.0;
+   rotate_draw.scale_z      = 1;
+   rotate_draw.scale_enable = true;
+   coords.vertices          = 4;
+   coords.vertex            = NULL;
+   coords.tex_coord         = NULL;
+   coords.lut_tex_coord     = NULL;
+   draw.width               = w;
+   draw.height              = h;
+   draw.coords              = &coords;
+   draw.matrix_data         = &mymat;
+   draw.prim_type           = MENU_DISPLAY_PRIM_TRIANGLESTRIP;
+   draw.pipeline.id         = 0;
+   coords.color             = (const float*)color;
+   menu_display_rotate_z(&rotate_draw);
+   draw.texture             = texture;
+   draw.x                   = x;
+   draw.y                   = height - y;
+   menu_display_draw(&draw);
+}
+
 void menu_display_rotate_z(menu_display_ctx_rotate_draw_t *draw)
 {
 #if !defined(VITA)
@@ -751,16 +790,9 @@ void menu_display_snow(int width, int height)
       float alpha;
       bool alive;
    };
-   static struct display_particle particles[PARTICLES_COUNT];
-   static bool initialized = false;
+   static struct display_particle particles[PARTICLES_COUNT] = {{0}};
    static int timeout      = 0;
    unsigned i, max_gen     = 2;
-
-   if (!initialized)
-   {
-      memset(particles, 0, sizeof(particles));
-      initialized = true;
-   }
 
    for (i = 0; i < PARTICLES_COUNT; ++i)
    {
@@ -820,11 +852,37 @@ void menu_display_snow(int width, int height)
    }
 }
 
-void menu_display_draw_text(const char *msg,
-      int width, int height, struct font_params *params)
+void menu_display_draw_text(
+      const font_data_t *font, const char *text,
+      float x, float y, int width, int height,
+      uint32_t color, enum text_alignment text_align,
+      float scale, bool shadows_enable, float shadow_offset)
 {
-   void *fb_buf = menu_display_get_font_buffer();
-   video_driver_set_osd_msg(msg, params, fb_buf);
+   struct font_params params;
+
+   /* Don't draw outside of the screen */
+   if (x < -64 || x > width + 64
+         || y < -64 || y > height + 64)
+      return;
+
+   params.x           = x / width;
+   params.y           = 1.0f - y / height;
+   params.scale       = scale;
+   params.drop_mod    = 0.0f;
+   params.drop_x      = 0.0f;
+   params.drop_y      = 0.0f;
+   params.color       = color;
+   params.full_screen = true;
+   params.text_align  = text_align;
+
+   if (shadows_enable)
+   {
+      params.drop_x      = shadow_offset;
+      params.drop_y      = -shadow_offset;
+      params.drop_alpha  = 0.35f;
+   }
+
+   video_driver_set_osd_msg(text, &params, (void*)font);
 }
 
 void menu_display_set_alpha(float *color, float alpha_value)
@@ -837,16 +895,24 @@ void menu_display_set_alpha(float *color, float alpha_value)
 void menu_display_reset_textures_list(const char *texture_path, const char *iconpath,
       uintptr_t *item)
 {
-   struct texture_image ti     = {0};
-   char path[PATH_MAX_LENGTH]  = {0};
+   struct texture_image ti;
+   char path[PATH_MAX_LENGTH];
 
-   if (texture_path != NULL)
+   path[0]                     = '\0';
+
+   ti.width                    = 0;
+   ti.height                   = 0;
+   ti.pixels                   = NULL;
+
+   if (!string_is_empty(texture_path))
       fill_pathname_join(path, iconpath, texture_path, sizeof(path));
 
    if (string_is_empty(path) || !path_file_exists(path))
       return;
 
-   image_texture_load(&ti, path);
+   if (!image_texture_load(&ti, path))
+      return;
+
    video_driver_texture_load(&ti,
          TEXTURE_FILTER_MIPMAP_LINEAR, item);
    image_texture_free(&ti);

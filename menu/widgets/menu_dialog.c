@@ -1,5 +1,6 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2011-2016 - Daniel De Matteis
+ *  Copyright (C) 2016 - Brad Parker
  *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
@@ -85,7 +86,7 @@ int menu_dialog_iterate(char *s, size_t len, const char *label)
       case MENU_DIALOG_HELP_CONTROLS:
          {
             unsigned i;
-            char s2[PATH_MAX_LENGTH] = {0};
+            char s2[PATH_MAX_LENGTH];
             const unsigned binds[] = {
                RETRO_DEVICE_ID_JOYPAD_UP,
                RETRO_DEVICE_ID_JOYPAD_DOWN,
@@ -98,7 +99,10 @@ int menu_dialog_iterate(char *s, size_t len, const char *label)
                RETRO_DEVICE_ID_JOYPAD_X,
                RETRO_DEVICE_ID_JOYPAD_Y,
             };
-            char desc[ARRAY_SIZE(binds)][64] = {{0}};
+            char desc[ARRAY_SIZE(binds)][64];
+
+            for (i = 0; i < ARRAY_SIZE(binds); i++)
+               desc[i][0] = '\0';
 
             for (i = 0; i < ARRAY_SIZE(binds); i++)
             {
@@ -112,6 +116,8 @@ int menu_dialog_iterate(char *s, size_t len, const char *label)
                input_config_get_bind_string(desc[i],
                      keybind, auto_bind, sizeof(desc[i]));
             }
+
+            s2[0] = '\0';
 
             menu_hash_get_help_enum(MENU_ENUM_LABEL_VALUE_MENU_ENUM_CONTROLS_PROLOG,
                   s2, sizeof(s2));
@@ -261,18 +267,42 @@ void menu_dialog_push_pending(bool push, enum menu_dialog_type type)
 
 void menu_dialog_push(void)
 {
-   menu_displaylist_info_t info = {0};
+   menu_displaylist_info_t info;
 
    if (!menu_dialog_is_push_pending())
       return;
 
-   info.list = menu_entries_get_menu_stack_ptr(0);
+   info.need_sort            = false;
+   info.need_refresh         = false;
+   info.need_entries_refresh = false;
+   info.need_push            = false;
+   info.need_clear           = false;
+   info.need_navigation_clear= false;
+   info.list                 = menu_entries_get_menu_stack_ptr(0);
+   info.menu_list            = NULL;
+   info.path[0]              = '\0';
+   info.path_b[0]            = '\0';
+   info.path_c[0]            = '\0';
+   info.label[0]             = '\0';
+   info.label_hash           = 0;
+   info.exts[0]              = '\0';
+   info.type                 = 0;
+   info.type_default         = 0;
+   info.directory_ptr        = 0;
+   info.flags                = 0;
+   info.enum_idx             = MENU_ENUM_LABEL_HELP;
+   info.setting              = NULL;
+
    strlcpy(info.label,
          msg_hash_to_str(MENU_ENUM_LABEL_HELP),
          sizeof(info.label));
-   info.enum_idx = MENU_ENUM_LABEL_HELP;
 
    menu_displaylist_ctl(DISPLAYLIST_HELP, &info);
+}
+
+void menu_dialog_set_current_id(unsigned id)
+{
+   menu_dialog_current_id   = id;
 }
 
 void menu_dialog_reset(void)

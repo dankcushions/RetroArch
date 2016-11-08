@@ -41,7 +41,6 @@ static unsigned int dbus_screensaver_cookie = 0;
 #endif
 
 static bool xdg_screensaver_available = true;
-static bool xdg_screensaver_running = false;
 
 Colormap g_x11_cmap;
 Window   g_x11_win;
@@ -56,6 +55,7 @@ static bool g_x11_has_focus;
 static XIM g_x11_xim;
 static XIC g_x11_xic;
 static bool g_x11_true_full;
+bool g_x11_entered            = false;
 
 unsigned g_x11_screen;
 
@@ -284,12 +284,11 @@ void x11_set_window_attr(Display *dpy, Window win)
 static void xdg_screensaver_inhibit(Window wnd)
 {
    int ret;
-   char               cmd[64] = {0};
+   char               cmd[64];
+
+   cmd[0] = '\0';
 
    if (!xdg_screensaver_available)
-      return;
-
-   if (xdg_screensaver_running)
       return;
 
    RARCH_LOG("Suspending screensaver (X11, xdg-screensaver).\n");
@@ -307,46 +306,15 @@ static void xdg_screensaver_inhibit(Window wnd)
       xdg_screensaver_available = false;
       RARCH_WARN("Could not suspend screen saver.\n");
    }
-   else
-   {
-      xdg_screensaver_running = true;
-   }
-}
-
-static void xdg_screensaver_uninhibit(Window wnd)
-{
-   int ret;
-   char               cmd[64] = {0};
-
-   if (!xdg_screensaver_available)
-      return;
-
-   if (!xdg_screensaver_running)
-      return;
-
-   RARCH_LOG("Resuming screensaver (X11, xdg-screensaver).\n");
-
-   snprintf(cmd, sizeof(cmd), "xdg-screensaver resume 0x%x", (int)wnd);
-
-   ret = system(cmd);
-
-   if (ret == -1)
-   {
-      xdg_screensaver_available = false;
-      RARCH_WARN("Failed to launch xdg-screensaver.\n");
-   }
-   else if (WEXITSTATUS(ret))
-   {
-      xdg_screensaver_available = false;
-      RARCH_WARN("Could not suspend screen saver.\n");
-   }
 }
 
 void x11_suspend_screensaver_xdg_screensaver(Window wnd, bool enable)
 {
-   if (enable)
-      xdg_screensaver_inhibit(wnd);
-   xdg_screensaver_uninhibit(wnd);
+   /* Check if screensaver suspend is enabled in config */
+   if (!enable)
+      return;
+
+   xdg_screensaver_inhibit(wnd);
 }
 
 void x11_suspend_screensaver(Window wnd, bool enable)
@@ -625,7 +593,34 @@ bool x11_alive(void *data)
             break;
 
          case ButtonPress:
-            x_input_poll_wheel(&event.xbutton, true);
+            switch (event.xbutton.button)
+            {
+               case 1: /* Left click */
+#if 0
+                  RARCH_LOG("Click occurred : [%d, %d]\n",
+                        event.xbutton.x_root,
+                        event.xbutton.y_root);
+#endif
+                  break;
+               case 2: /* Grabbed  */
+                       /* Middle click */
+                  break;
+               case 3: /* Right click */
+                  break;
+               case 4: /* Grabbed  */
+                       /* Scroll up */
+               case 5: /* Scroll down */
+                  x_input_poll_wheel(&event.xbutton, true);
+                  break;
+            }
+            break;
+
+         case EnterNotify:
+            g_x11_entered = true;
+            break;
+
+         case LeaveNotify:
+            g_x11_entered = false;
             break;
 
          case ButtonRelease:
@@ -726,9 +721,11 @@ bool x11_connect(void)
 
 void x11_update_window_title(void *data)
 {
-   char buf[128]           = {0};
-   char buf_fps[128]       = {0};
+   char buf[128];
+   char buf_fps[128];
    settings_t *settings    = config_get_ptr();
+
+   buf[0] = buf_fps[0] = '\0';
 
    if (video_monitor_get_fps(buf, sizeof(buf), buf_fps, sizeof(buf_fps)))
       XStoreName(g_x11_dpy, g_x11_win, buf);

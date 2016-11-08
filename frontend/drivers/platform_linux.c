@@ -370,7 +370,6 @@ static void android_app_entry(void *data)
 {
    char arguments[]  = "retroarch";
    char      *argv[] = {arguments,   NULL};
-   int          ret  = 0;
    int          argc = 1;
 
    if (rarch_main(argc, argv, data) != 0)
@@ -379,12 +378,14 @@ static void android_app_entry(void *data)
    do
    {
       unsigned sleep_ms = 0;
-      ret = runloop_iterate(&sleep_ms);
+      int           ret = runloop_iterate(&sleep_ms);
 
       if (ret == 1 && sleep_ms > 0)
          retro_sleep(sleep_ms);
       task_queue_ctl(TASK_QUEUE_CTL_CHECK, NULL);
-   }while (ret != -1);
+      if (ret == -1)
+         break;
+   }while(1);
 
    main_exit(data);
 #endif
@@ -760,7 +761,6 @@ static void check_proc_acpi_sysfs_battery(const char *node,
 {
    unsigned capacity;
    char path[1024]   = {0};
-   char info[1024]   = {0};
    const char *base  = proc_acpi_sysfs_battery_path;
    char        *buf  = NULL;
    char         *ptr = NULL;
@@ -856,7 +856,6 @@ static void check_proc_acpi_sysfs_ac_adapter(const char * node, bool *have_ac)
 static bool next_string(char **_ptr, char **_str)
 {
    char *ptr = *_ptr;
-   char *str = *_str;
 
    while (*ptr == ' ')       /* skip any spaces... */
       ptr++;
@@ -864,14 +863,12 @@ static bool next_string(char **_ptr, char **_str)
    if (*ptr == '\0')
       return false;
 
-   str = ptr;
    while ((*ptr != ' ') && (*ptr != '\n') && (*ptr != '\0'))
       ptr++;
 
    if (*ptr != '\0')
       *(ptr++) = '\0';
 
-   *_str = str;
    *_ptr = ptr;
    return true;
 }
@@ -1120,6 +1117,7 @@ static enum frontend_powerstate frontend_linux_get_powerstate(
 #define LINUX_ARCH_PPC64      0x1028cf52U
 #define LINUX_ARCH_MIPS       0x7c9aa25eU
 #define LINUX_ARCH_TILE       0x7c9e7873U
+#define LINUX_ARCH_AARCH64    0x191bfc0eU
 #define LINUX_ARCH_ARMV7B     0xf27015f4U
 #define LINUX_ARCH_ARMV7L     0xf27015feU
 #define LINUX_ARCH_ARMV6L     0xf27015ddU
@@ -1141,6 +1139,8 @@ static enum frontend_architecture frontend_linux_get_architecture(void)
 
    switch (buffer_hash)
    {
+      case LINUX_ARCH_AARCH64:
+         return FRONTEND_ARCH_ARMV8;
       case LINUX_ARCH_ARMV7L:
       case LINUX_ARCH_ARMV7B:
          return FRONTEND_ARCH_ARMV7;
@@ -2092,6 +2092,8 @@ frontend_ctx_driver_t frontend_ctx_linux = {
    frontend_linux_get_signal_handler_state,
    frontend_linux_set_signal_handler_state,
    frontend_linux_destroy_signal_handler_state,
+   NULL,                         /* attach_console */
+   NULL,                         /* detach_console */
 #ifdef ANDROID
    "android"
 #else

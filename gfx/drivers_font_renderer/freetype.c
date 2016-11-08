@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <string.h>
+#include <ctype.h>
 
 #include <ft2build.h>
 
@@ -24,37 +25,36 @@
 #include <retro_miscellaneous.h>
 
 #include FT_FREETYPE_H
-
 #include "../font_driver.h"
 
 #define FT_ATLAS_ROWS 16
 #define FT_ATLAS_COLS 16
 #define FT_ATLAS_SIZE (FT_ATLAS_ROWS * FT_ATLAS_COLS)
 
+typedef struct freetype_atlas_slot
+{
+   struct font_glyph glyph;
+   unsigned charcode;
+   unsigned last_used;
+   struct freetype_atlas_slot* next;
+}freetype_atlas_slot_t;
+
 typedef struct freetype_renderer
 {
    FT_Library lib;
    FT_Face face;
-
    struct font_atlas atlas;
-   struct font_glyph glyphs[FT_ATLAS_SIZE];
+   freetype_atlas_slot_t atlas_slots[FT_ATLAS_SIZE];
+   freetype_atlas_slot_t* uc_map[0x100];
+   unsigned usage_counter;
 } ft_font_renderer_t;
 
-static const struct font_atlas *font_renderer_ft_get_atlas(void *data)
+static struct font_atlas *font_renderer_ft_get_atlas(void *data)
 {
    ft_font_renderer_t *handle = (ft_font_renderer_t*)data;
    if (!handle)
       return NULL;
    return &handle->atlas;
-}
-
-static const struct font_glyph *font_renderer_ft_get_glyph(
-      void *data, uint32_t code)
-{
-   ft_font_renderer_t *handle = (ft_font_renderer_t*)data;
-   if (!handle)
-      return NULL;
-   return code < FT_ATLAS_SIZE ? &handle->glyphs[code] : NULL;
 }
 
 static void font_renderer_ft_free(void *data)
@@ -72,94 +72,132 @@ static void font_renderer_ft_free(void *data)
    free(handle);
 }
 
-static bool font_renderer_create_atlas(ft_font_renderer_t *handle)
+static freetype_atlas_slot_t* font_renderer_get_slot(ft_font_renderer_t *handle)
 {
-   unsigned i;
-   bool ret = true;
+   int i, map_id;
+   unsigned oldest = 0;
 
-   uint8_t *buffer[FT_ATLAS_SIZE] = {NULL};
-   unsigned pitches[FT_ATLAS_SIZE] = {0};
+   for (i = 1; i < FT_ATLAS_SIZE; i++)
+      if((handle->usage_counter - handle->atlas_slots[i].last_used) >
+         (handle->usage_counter - handle->atlas_slots[oldest].last_used))
+         oldest = i;
 
-   unsigned max_width = 0;
-   unsigned max_height = 0;
-
-   for (i = 0; i < FT_ATLAS_SIZE; i++)
+   /* remove from map */
+   map_id = handle->atlas_slots[oldest].charcode & 0xFF;
+   if(handle->uc_map[map_id] == &handle->atlas_slots[oldest])
+      handle->uc_map[map_id] = handle->atlas_slots[oldest].next;
+   else if (handle->uc_map[map_id])
    {
-      FT_GlyphSlot slot;
-      struct font_glyph *glyph = &handle->glyphs[i];
-
-      if (!glyph)
-         continue;
-
-      if (FT_Load_Char(handle->face, i, FT_LOAD_RENDER))
-      {
-         ret = false;
-         goto end;
-      }
-
-      FT_Render_Glyph(handle->face->glyph, FT_RENDER_MODE_NORMAL);
-      slot = handle->face->glyph;
-
-      /* Some glyphs can be blank. */
-      buffer[i] = (uint8_t*)calloc(slot->bitmap.rows * slot->bitmap.pitch, 1);
-
-      glyph->width = slot->bitmap.width;
-      glyph->height = slot->bitmap.rows;
-      pitches[i] = slot->bitmap.pitch;
-
-      glyph->advance_x = slot->advance.x >> 6;
-      glyph->advance_y = slot->advance.y >> 6;
-      glyph->draw_offset_x = slot->bitmap_left;
-      glyph->draw_offset_y = -slot->bitmap_top;
-
-      if (buffer[i])
-         memcpy(buffer[i], slot->bitmap.buffer,
-               slot->bitmap.rows * pitches[i]);
-      max_width  = MAX(max_width, (unsigned)slot->bitmap.width);
-      max_height = MAX(max_height, (unsigned)slot->bitmap.rows);
+      freetype_atlas_slot_t* ptr = handle->uc_map[map_id];
+      while(ptr->next && ptr->next != &handle->atlas_slots[oldest])
+         ptr = ptr->next;
+      ptr->next = handle->atlas_slots[oldest].next;
    }
 
-   handle->atlas.width = max_width * FT_ATLAS_COLS;
-   handle->atlas.height = max_height * FT_ATLAS_ROWS;
+   return &handle->atlas_slots[oldest];
+}
 
-   handle->atlas.buffer = (uint8_t*)
+static const struct font_glyph *font_renderer_ft_get_glyph(
+      void *data, uint32_t charcode)
+{
+   unsigned map_id;
+   uint8_t *dst;
+   FT_GlyphSlot slot;
+   freetype_atlas_slot_t* atlas_slot;
+   ft_font_renderer_t *handle = (ft_font_renderer_t*)data;
+
+   if (!handle)
+      return NULL;
+
+   map_id     = charcode & 0xFF;
+   atlas_slot = handle->uc_map[map_id];
+
+   while(atlas_slot)
+   {
+      if(atlas_slot->charcode == charcode)
+      {
+         atlas_slot->last_used = handle->usage_counter++;
+         return &atlas_slot->glyph;
+      }
+      atlas_slot = atlas_slot->next;
+   }
+
+   if (FT_Load_Char(handle->face, charcode, FT_LOAD_RENDER))
+      return NULL;
+
+   FT_Render_Glyph(handle->face->glyph, FT_RENDER_MODE_NORMAL);
+   slot = handle->face->glyph;
+
+   atlas_slot             = font_renderer_get_slot(handle);
+   atlas_slot->charcode   = charcode;
+   atlas_slot->next       = handle->uc_map[map_id];
+   handle->uc_map[map_id] = atlas_slot;
+
+   /* Some glyphs can be blank. */
+   atlas_slot->glyph.width         = slot->bitmap.width;
+   atlas_slot->glyph.height        = slot->bitmap.rows;
+   atlas_slot->glyph.advance_x     = slot->advance.x >> 6;
+   atlas_slot->glyph.advance_y     = slot->advance.y >> 6;
+   atlas_slot->glyph.draw_offset_x = slot->bitmap_left;
+   atlas_slot->glyph.draw_offset_y = -slot->bitmap_top;
+
+   dst = (uint8_t*)handle->atlas.buffer + atlas_slot->glyph.atlas_offset_x
+         + atlas_slot->glyph.atlas_offset_y * handle->atlas.width;
+
+   if (slot->bitmap.buffer)
+   {
+      unsigned r, c;
+      const uint8_t *src = (const uint8_t*)slot->bitmap.buffer;
+
+      for (r = 0; r < atlas_slot->glyph.height;
+            r++, dst += handle->atlas.width, src += slot->bitmap.pitch)
+         for (c = 0; c < atlas_slot->glyph.width; c++)
+            dst[c] = src[c];
+   }
+
+   handle->atlas.dirty = true;
+   atlas_slot->last_used = handle->usage_counter++;
+   return &atlas_slot->glyph;
+}
+
+static bool font_renderer_create_atlas(ft_font_renderer_t *handle, float font_size)
+{
+   unsigned i, x, y;
+   freetype_atlas_slot_t* slot = NULL;
+
+   /* TODO: find a better way to determine max_width/max_height */
+   unsigned max_width          = font_size + 2;
+   unsigned max_height         = font_size + 2;
+
+   handle->atlas.width         = max_width  * FT_ATLAS_COLS;
+   handle->atlas.height        = max_height * FT_ATLAS_ROWS;
+
+   handle->atlas.buffer        = (uint8_t*)
       calloc(handle->atlas.width * handle->atlas.height, 1);
 
    if (!handle->atlas.buffer)
+      return false;
+
+   slot = handle->atlas_slots;
+
+   for (y = 0; y < FT_ATLAS_ROWS; y++)
    {
-      ret = false;
-      goto end;
-   }
-
-   /* Blit our texture atlas. */
-   for (i = 0; i < FT_ATLAS_SIZE; i++)
-   {
-      uint8_t *dst      = NULL;
-      unsigned offset_x = (i % FT_ATLAS_COLS) * max_width;
-      unsigned offset_y = (i / FT_ATLAS_COLS) * max_height;
-
-      handle->glyphs[i].atlas_offset_x = offset_x;
-      handle->glyphs[i].atlas_offset_y = offset_y;
-
-      dst = (uint8_t*)handle->atlas.buffer;
-      dst += offset_x + offset_y * handle->atlas.width;
-
-      if (buffer[i])
+      for (x = 0; x < FT_ATLAS_COLS; x++)
       {
-         unsigned r, c;
-         const uint8_t *src = (const uint8_t*)buffer[i];
-
-         for (r = 0; r < handle->glyphs[i].height;
-               r++, dst += handle->atlas.width, src += pitches[i])
-            for (c = 0; c < handle->glyphs[i].width; c++)
-               dst[c] = src[c];
+         slot->glyph.atlas_offset_x = x * max_width;
+         slot->glyph.atlas_offset_y = y * max_height;
+         slot++;
       }
    }
 
-end:
-   for (i = 0; i < FT_ATLAS_SIZE; i++)
-      free(buffer[i]);
-   return ret;
+   for (i = 0; i < 256; i++)
+      font_renderer_ft_get_glyph(handle, i);
+
+   for (i = 0; i < 256; i++)
+      if(isalnum(i))
+         font_renderer_ft_get_glyph(handle, i);
+
+   return true;
 }
 
 static void *font_renderer_ft_init(const char *font_path, float font_size)
@@ -172,6 +210,9 @@ static void *font_renderer_ft_init(const char *font_path, float font_size)
    if (!handle)
       goto error;
 
+   if (font_size < 1.0)
+      goto error;
+
    err = FT_Init_FreeType(&handle->lib);
    if (err)
       goto error;
@@ -180,11 +221,15 @@ static void *font_renderer_ft_init(const char *font_path, float font_size)
    if (err)
       goto error;
 
+   err = FT_Select_Charmap(handle->face, FT_ENCODING_UNICODE);
+   if (err)
+      goto error;
+
    err = FT_Set_Pixel_Sizes(handle->face, 0, font_size);
    if (err)
       goto error;
 
-   if (!font_renderer_create_atlas(handle))
+   if (!font_renderer_create_atlas(handle, font_size))
       goto error;
 
    return handle;

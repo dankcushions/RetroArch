@@ -29,6 +29,7 @@
 #include "menu_shader.h"
 #include "../file_path_special.h"
 #include "../configuration.h"
+#include "../paths.h"
 #include "../runloop.h"
 #include "../verbosity.h"
 
@@ -52,7 +53,7 @@ void menu_shader_manager_init(void)
    struct video_shader *shader = NULL;
    config_file_t *conf         = NULL;
    settings_t *settings        = config_get_ptr();
-   const char *config_path     = config_get_active_path();
+   const char *config_path     = path_get(RARCH_PATH_CONFIG);
 
    menu_driver_ctl(RARCH_MENU_CTL_SHADER_GET,
          &shader);
@@ -110,10 +111,12 @@ void menu_shader_manager_init(void)
          break;
       default:
          {
-            char preset_path[PATH_MAX_LENGTH] = {0};
+            char preset_path[PATH_MAX_LENGTH];
             const char *shader_dir            = 
                *settings->directory.video_shader ?
                settings->directory.video_shader : settings->directory.system;
+
+            preset_path[0] = '\0';
 
             fill_pathname_join(preset_path, shader_dir,
                   "menu.glslp", sizeof(preset_path));
@@ -213,22 +216,23 @@ bool menu_shader_manager_save_preset(
       const char *basename, bool apply, bool fullpath)
 {
 #ifdef HAVE_SHADER_MANAGER
-   char buffer[PATH_MAX_LENGTH]           = {0};
-   char config_directory[PATH_MAX_LENGTH] = {0};
-   char preset_path[PATH_MAX_LENGTH]      = {0};
+   char buffer[PATH_MAX_LENGTH];
+   char config_directory[PATH_MAX_LENGTH];
+   char preset_path[PATH_MAX_LENGTH];
    unsigned d, type                       = RARCH_SHADER_NONE;
    const char *dirs[3]                    = {0};
    config_file_t *conf                    = NULL;
    bool ret                               = false;
    struct video_shader *shader            = NULL;
-   global_t *global                       = global_get_ptr();
    settings_t *settings                   = config_get_ptr();
    menu_handle_t *menu                    = NULL;
 
+   buffer[0] = config_directory[0]        = '\0';
+   preset_path[0]                         = '\0';
+
    if (!menu_driver_ctl(RARCH_MENU_CTL_DRIVER_DATA_GET, &menu))
    {
-      RARCH_ERR("Cannot save shader preset, menu handle"
-            " is not initialized.\n");
+      RARCH_ERR("Cannot save shader preset.\n");
       return false;
    }
 
@@ -292,13 +296,15 @@ bool menu_shader_manager_save_preset(
             conf_path = default_cgp;
             break;
       }
-      strlcpy(buffer, conf_path, sizeof(buffer));
+
+      if (!string_is_empty(conf_path))
+         strlcpy(buffer, conf_path, sizeof(buffer));
    }
 
-   if (!string_is_empty(global->path.config))
+   if (!path_is_empty(RARCH_PATH_CONFIG))
       fill_pathname_basedir(
             config_directory,
-            global->path.config,
+            path_get(RARCH_PATH_CONFIG),
             sizeof(config_directory));
 
    if (!fullpath)
@@ -350,17 +356,13 @@ bool menu_shader_manager_save_preset(
    }
 
    config_file_free(conf);
-   if (!ret)
-   {
-      RARCH_ERR("Failed to save shader preset. Make sure config directory"
-            " and/or shader dir are writable.\n");
-      return false;
-   }
-   else
+   if (ret)
       return true;
-#else
-   return false;
+
+   RARCH_ERR("Failed to save shader preset. Make sure config directory"
+         " and/or shader dir are writable.\n");
 #endif
+   return false;
 }
 
 /**
@@ -373,12 +375,11 @@ bool menu_shader_manager_save_preset(
  **/
 unsigned menu_shader_manager_get_type(const void *data)
 {
-#ifndef HAVE_SHADER_MANAGER
-   return RARCH_SHADER_NONE;
-#else
+   unsigned type                     = RARCH_SHADER_NONE;
+#ifdef HAVE_SHADER_MANAGER
    const struct video_shader *shader = (const struct video_shader*)data;
    /* All shader types must be the same, or we cannot use it. */
-   unsigned i = 0, type = 0;
+   unsigned i                        = 0;
 
    if (!shader)
       return RARCH_SHADER_NONE;
@@ -387,7 +388,7 @@ unsigned menu_shader_manager_get_type(const void *data)
    {
       enum rarch_shader_type pass_type = 
          video_shader_parse_type(shader->pass[i].source.path,
-            RARCH_SHADER_NONE);
+               RARCH_SHADER_NONE);
 
       switch (pass_type)
       {
@@ -400,12 +401,12 @@ unsigned menu_shader_manager_get_type(const void *data)
                return RARCH_SHADER_NONE;
             break;
          default:
-            return RARCH_SHADER_NONE;
+            break;
       }
    }
 
-   return type;
 #endif
+   return type;
 }
 
 /**

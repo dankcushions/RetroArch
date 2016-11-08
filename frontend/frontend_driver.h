@@ -50,6 +50,7 @@ enum frontend_architecture
    FRONTEND_ARCH_PPC,
    FRONTEND_ARCH_ARM,
    FRONTEND_ARCH_ARMV7,
+   FRONTEND_ARCH_ARMV8,
    FRONTEND_ARCH_MIPS,
    FRONTEND_ARCH_TILE
 };
@@ -82,6 +83,8 @@ typedef struct frontend_ctx_driver
    int (*get_signal_handler_state)(void);
    void (*set_signal_handler_state)(int value);
    void (*destroy_signal_handler_state)(void);
+   void (*attach_console)(void);
+   void (*detach_console)(void);
 
    const char *ident;
 
@@ -89,6 +92,7 @@ typedef struct frontend_ctx_driver
 } frontend_ctx_driver_t;
 
 extern frontend_ctx_driver_t frontend_ctx_gx;
+extern frontend_ctx_driver_t frontend_ctx_wiiu;
 extern frontend_ctx_driver_t frontend_ctx_ps3;
 extern frontend_ctx_driver_t frontend_ctx_xdk;
 extern frontend_ctx_driver_t frontend_ctx_qnx;
@@ -168,6 +172,10 @@ int frontend_driver_get_signal_handler_state(void);
 void frontend_driver_set_signal_handler_state(int value);
 
 void frontend_driver_destroy_signal_handler_state(void);
+
+void frontend_driver_attach_console(void);
+
+void frontend_driver_detach_console(void);
 
 RETRO_END_DECLS
 

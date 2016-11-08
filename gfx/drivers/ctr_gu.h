@@ -23,6 +23,8 @@
 #include <string.h>
 #include <retro_inline.h>
 
+#include "ctr/ctr_debug.h"
+
 #define VIRT_TO_PHYS(vaddr) \
    (((u32)(vaddr)) >= 0x14000000 && ((u32)(vaddr)) < 0x1c000000)?(void*)((u32)(vaddr) + 0x0c000000):\
    (((u32)(vaddr)) >= 0x1F000000 && ((u32)(vaddr)) < 0x1F600000)?(void*)((u32)(vaddr) - 0x07000000):\
@@ -51,17 +53,6 @@
 #define CTR_CPU_TICKS_PER_SECOND    268123480
 #define CTR_CPU_TICKS_PER_FRAME     4481134
 
-#ifndef DEBUG_HOLD
-void wait_for_input(void);
-#define PRINTFPOS(X,Y) "\x1b["#X";"#Y"H"
-#define PRINTF_LINE(X) "\x1b["X";0H"
-#define DEBUG_HOLD() do{printf("%s@%s:%d.\n",__FUNCTION__, __FILE__, __LINE__);fflush(stdout);wait_for_input();}while(0)
-#define DEBUG_VAR(X) printf( "%-20s: 0x%08X\n", #X, (u32)(X))
-#define DEBUG_VAR64(X) printf( #X"\r\t\t\t\t : 0x%016llX\n", (u64)(X))
-#endif
-
-
-extern Handle gspEvents[GSPGPU_EVENT_MAX];
 extern u32* gpuCmdBuf;
 extern u32 gpuCmdBufOffset;
 extern u32 __linear_heap_size;
@@ -244,6 +235,17 @@ static INLINE void ctrGuSetVshGsh(shaderProgram_s* sp, DVLB_s* dvlb, u32 vsh_out
    shaderProgramInit(sp);
    shaderProgramSetVsh(sp, &dvlb->DVLE[0]);
    shaderProgramSetGsh(sp, &dvlb->DVLE[1], gsh_input_count);
+}
+
+__attribute__((always_inline))
+static INLINE int ctrgu_swizzle_coords(int x, int y, int width)
+{
+   int pos = (x & 0x1) << 0 | ((x & 0x2) << 1) | ((x & 0x4) << 2) |
+             (y & 0x1) << 1 | ((y & 0x2) << 2) | ((y & 0x4) << 3);
+
+
+   return ((x >> 3) << 6) + ((y >> 3) * ((width >> 3) << 6)) + pos;
+
 }
 
 #endif // CTR_GU_H

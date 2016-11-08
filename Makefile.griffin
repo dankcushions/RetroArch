@@ -131,7 +131,6 @@ endif
   HAVE_RBMP					   := 1
   HAVE_RTGA					   := 1
   HAVE_OVERLAY             := 1
-  HAVE_BUILTIN_AUTOCONFIG  := 1
   HAVE_ZLIB                := 1
   WANT_ZLIB						:= 1
   HAVE_7ZIP                := 1
@@ -210,13 +209,14 @@ else ifeq ($(platform), vita)
   EXT_INTER_TARGET := $(TARGET_NAME)_$(platform).elf
   MACHDEP := -DVITA
   WANT_ZLIB						:= 1
-  INCLUDE += -I$(VITASDK)/arm-vita-eabi/include/freetype2 -Ideps/libvita2d/include
+  INCLUDE += -Ideps/libvita2d/include
   INCLUDE += -Ideps/zlib
-  PLATCFLAGS := -mthumb -mfloat-abi=hard -ffast-math -fsingle-precision-constant -mword-relocations
+  PLATCFLAGS := -marm -mfloat-abi=hard -fsingle-precision-constant \
+       -mword-relocations -fno-unwind-tables -fno-asynchronous-unwind-tables -ftree-vectorize -fno-optimize-sibling-calls
   LIBS += -lSceKernel_stub -lSceDisplay_stub -lSceGxm_stub -lSceNet_stub -lSceNetCtl_stub\
-			 -lSceSysmodule_stub -lSceCtrl_stub -lSceAudio_stub -lSceFiber_stub\
+			 -lSceSysmodule_stub -lSceCtrl_stub -lSceTouch_stub -lSceAudio_stub -lSceFiber_stub\
 			 -lScePower_stub -lSceRtc_stub -lSceCommonDialog_stub -lScePgf_stub \
-			 -lSceMotion_stub -lSceAppMgr_stub -lfreetype -lpng -lm -lc
+			 -lSceMotion_stub -lSceAppMgr_stub -lpng -lm -lc
 
   PLATEXTRA := deps/libvita2d/shader/compiled/clear_v_gxp.o \
 				  deps/libvita2d/shader/compiled/clear_f_gxp.o \
@@ -226,14 +226,15 @@ else ifeq ($(platform), vita)
 				  deps/libvita2d/shader/compiled/texture_f_gxp.o \
 				  deps/libvita2d/shader/compiled/texture_tint_f_gxp.o
   PLATOBJS +=			  libretro-common/conversion/s16_to_float_neon.o \
-				  audio/drivers_resampler/sinc_resampler_neon.o \
-              audio/drivers_resampler/cc_resampler_neon.o
+                    libretro-common/conversion/float_to_s16_neon.o \
+                    memory/neon/memcpy-neon.o \
+				            audio/drivers_resampler/sinc_resampler_neon.o \
+                    audio/drivers_resampler/cc_resampler_neon.o
 
   LIBDIRS += -L.
   LDFLAGS +=  -Wl,-q
 
   HAVE_FILTERS_BUILTIN     := 1
-  HAVE_BUILTIN_AUTOCONFIG  := 1
   HAVE_LANGEXTRA				:= 1
   HAVE_RPNG                := 1
   HAVE_RJPEG					:= 1
@@ -243,12 +244,13 @@ else ifeq ($(platform), vita)
   HAVE_7ZIP                := 1
   HAVE_VITA2D              := 1
   HAVE_NETWORKING          := 1
-  HAVE_NETPLAY             := 1
   HAVE_OVERLAY             := 1
   HAVE_MATERIALUI				:= 1
   HAVE_XMB						:= 1
+  HAVE_STB_FONT :=1
   RARCH_CONSOLE          = 1
   HAVE_THREADS     := 1
+  HAVE_LIBRETRODB := 1
 endif
 
 
@@ -335,16 +337,8 @@ ifeq ($(HAVE_OVERLAY), 1)
 CFLAGS      += -DHAVE_OVERLAY
 endif
 
-ifeq ($(HAVE_BUILTIN_AUTOCONFIG), 1)
-CFLAGS      += -DHAVE_BUILTIN_AUTOCONFIG
-endif
-
 ifeq ($(HAVE_NETWORKING), 1)
 CFLAGS      += -DHAVE_NETWORKING
-endif
-
-ifeq ($(HAVE_NETPLAY), 1)
-CFLAGS      += -DHAVE_NETPLAY
 endif
 
 ifeq ($(RARCH_CONSOLE), 1)
@@ -363,6 +357,10 @@ endif
 
 ifeq ($(HAVE_XMB), 1)
 CFLAGS += -DHAVE_XMB
+endif
+
+ifeq ($(HAVE_STB_FONT), 1)
+CFLAGS += -DHAVE_STB_FONT
 endif
 
 ifeq ($(HAVE_LANGEXTRA), 1)
@@ -396,7 +394,7 @@ ifeq ($(DEBUG), 1)
 else ifeq ($(platform), psp1)
    CFLAGS += -O2
 else ifeq ($(platform), vita)
-   CFLAGS += -O1
+   CFLAGS += -O3
 else
    CFLAGS += -O3
 endif

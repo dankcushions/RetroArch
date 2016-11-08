@@ -27,13 +27,9 @@
 #include "input_joypad_driver.h"
 #include "input_defines.h"
 
-RETRO_BEGIN_DECLS
+#include "../msg_hash.h"
 
-typedef struct retro_input
-{
-   unsigned type;
-   uint64_t state;
-} retro_input_t;
+RETRO_BEGIN_DECLS
 
 enum input_device_type
 {
@@ -56,7 +52,7 @@ struct retro_keybind
 {
    bool valid;
    unsigned id;
-   const char *desc;
+   enum msg_hash_enums enum_idx;
    enum retro_key key;
 
    uint64_t joykey;
@@ -80,7 +76,6 @@ typedef struct input_driver
    int16_t (*input_state)(void *data,
          const struct retro_keybind **retro_keybinds,
          unsigned port, unsigned device, unsigned index, unsigned id);
-   bool (*key_pressed)(void *data, int key);
    bool (*meta_key_pressed)(void *data, int key);
    void (*free)(void *data);
    bool (*set_sensor_state)(void *data, unsigned port,
@@ -98,6 +93,9 @@ typedef struct input_driver
    bool (*keyboard_mapping_is_blocked)(void *data);
    void (*keyboard_mapping_set_block)(void *data, bool value);
 } input_driver_t;
+
+extern const input_driver_t *current_input;
+extern void *current_input_data;
 
 /**
  * input_driver_find_handle:
@@ -137,9 +135,6 @@ const char* config_get_input_driver_options(void);
  **/
 bool input_driver_set_rumble_state(unsigned port,
       enum retro_rumble_effect effect, uint16_t strength);
-
-int16_t input_driver_state(const struct retro_keybind **retro_keybinds,
-      unsigned port, unsigned device, unsigned index, unsigned id);
 
 uint64_t input_driver_get_capabilities(void);
 
@@ -226,7 +221,9 @@ void input_poll(void);
 int16_t input_state(unsigned port, unsigned device,
       unsigned idx, unsigned id);
 
-retro_input_t input_keys_pressed(void);
+uint64_t input_keys_pressed(void);
+
+uint64_t input_menu_keys_pressed(void);
 
 void *input_driver_get_data(void);
 
@@ -235,8 +232,6 @@ const input_driver_t *input_get_ptr(void);
 const input_driver_t **input_get_double_ptr(void);
 
 void **input_driver_get_data_ptr(void);
-
-bool input_driver_key_pressed(unsigned *key);
 
 bool input_driver_has_capabilities(void);
 
@@ -318,6 +313,7 @@ extern input_driver_t input_psp;
 extern input_driver_t input_ctr;
 extern input_driver_t input_xenon360;
 extern input_driver_t input_gx;
+extern input_driver_t input_wiiu;
 extern input_driver_t input_xinput;
 extern input_driver_t input_linuxraw;
 extern input_driver_t input_udev;

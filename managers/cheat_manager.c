@@ -1,7 +1,7 @@
 /*  RetroArch - A frontend for libretro.
  *  Copyright (C) 2010-2014 - Hans-Kristian Arntzen
  *  Copyright (C) 2011-2016 - Daniel De Matteis
- * 
+ *
  *  RetroArch is free software: you can redistribute it and/or modify it under the terms
  *  of the GNU General Public License as published by the Free Software Found-
  *  ation, either version 3 of the License, or (at your option) any later version.
@@ -97,7 +97,9 @@ void cheat_manager_apply_cheats(void)
          core_set_cheat(&cheat_info);
       }
    }
-   
+    runloop_msg_queue_push(msg_hash_to_str(MSG_APPLYING_CHEAT), 1, 180, true);
+    RARCH_LOG("%s\n", msg_hash_to_str(MSG_APPLYING_CHEAT));
+
 #ifdef HAVE_CHEEVOS
    data_bool = idx != 0;
    cheevos_apply_cheats(&data_bool);
@@ -125,17 +127,19 @@ bool cheat_manager_save(const char *path)
 {
    bool ret;
    unsigned i;
+   char buf[PATH_MAX_LENGTH];
+   char cheats_file[PATH_MAX_LENGTH];
    config_file_t *conf               = NULL;
-   char buf[PATH_MAX_LENGTH]         = {0};
-   char cheats_file[PATH_MAX_LENGTH] = {0};
    settings_t              *settings = config_get_ptr();
-   cheat_manager_t *handle = cheat_manager_state;
+   cheat_manager_t *handle           = cheat_manager_state;
+
+   buf[0] = cheats_file[0] = '\0';
 
    fill_pathname_join(buf, settings->path.cheat_database,
          path, sizeof(buf));
 
    fill_pathname_noext(cheats_file, buf, ".cht", sizeof(cheats_file));
-   
+
    conf = config_file_new(cheats_file);
 
    if (!conf)
@@ -154,10 +158,12 @@ bool cheat_manager_save(const char *path)
 
    for (i = 0; i < handle->size; i++)
    {
-      char key[64]         = {0};
-      char desc_key[256]   = {0};
-      char code_key[256]   = {0};
-      char enable_key[256] = {0};
+      char key[64];
+      char desc_key[256];
+      char code_key[256];
+      char enable_key[256];
+
+      key[0] = desc_key[0] = code_key[0] = enable_key[0] = '\0';
 
       snprintf(key,        sizeof(key),        "cheat%u",        i);
       snprintf(desc_key,   sizeof(desc_key),   "cheat%u_desc",   i);
@@ -231,12 +237,14 @@ bool cheat_manager_load(const char *path)
 
    for (i = 0; i < cheats; i++)
    {
-      char key[64]         = {0};
-      char desc_key[256]   = {0};
-      char code_key[256]   = {0};
-      char enable_key[256] = {0};
+      char key[64];
+      char desc_key[256];
+      char code_key[256];
+      char enable_key[256];
       char *tmp            = NULL;
       bool tmp_bool        = false;
+
+      key[0] = desc_key[0] = code_key[0] = enable_key[0] = '\0';
 
       snprintf(key,        sizeof(key),        "cheat%u",        i);
       snprintf(desc_key,   sizeof(desc_key),   "cheat%u_desc",   i);
@@ -334,7 +342,7 @@ void cheat_manager_update(cheat_manager_t *handle, unsigned handle_idx)
 
    snprintf(msg, sizeof(msg), "Cheat: #%u [%s]: %s",
          handle_idx, handle->cheats[handle_idx].state ? "ON" : "OFF",
-         (handle->cheats[handle_idx].desc) ? 
+         (handle->cheats[handle_idx].desc) ?
          (handle->cheats[handle_idx].desc) : (handle->cheats[handle_idx].code)
          );
    runloop_msg_queue_push(msg, 1, 180, true);

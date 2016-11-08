@@ -38,21 +38,15 @@
 #include "../../managers/core_option_manager.h"
 #include "../../managers/cheat_manager.h"
 #include "../../performance_counters.h"
+#include "../../paths.h"
 #include "../../runloop.h"
-#include "../../intl/intl.h"
+#include "../../wifi/wifi_driver.h"
 
 #ifndef BIND_ACTION_GET_VALUE
 #define BIND_ACTION_GET_VALUE(cbs, name) \
    cbs->action_get_value = name; \
    cbs->action_get_value_ident = #name;
 #endif
-
-const char axis_labels[4][128] = {
-   RETRO_LBL_ANALOG_LEFT_X,
-   RETRO_LBL_ANALOG_LEFT_Y,
-   RETRO_LBL_ANALOG_RIGHT_X,
-   RETRO_LBL_ANALOG_RIGHT_Y
-};
 
 static void menu_action_setting_disp_set_label_cheat_num_passes(
       file_list_t* list,
@@ -125,12 +119,11 @@ static void menu_action_setting_disp_set_label_configurations(
       const char *path,
       char *s2, size_t len2)
 {
-   global_t *global = global_get_ptr();
-
    *w = 19;
    strlcpy(s2, path, len2);
-   if (global && *global->path.config)
-      fill_pathname_base(s, global->path.config,
+
+   if (!path_is_empty(RARCH_PATH_CONFIG))
+      fill_pathname_base(s, path_get(RARCH_PATH_CONFIG),
             len);
    else
       strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_DIRECTORY_DEFAULT), len);
@@ -223,12 +216,12 @@ static void menu_action_setting_disp_set_label_pipeline(
          strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_OFF), len);
          break;
       case XMB_SHADER_PIPELINE_SIMPLE_RIBBON:
-         strlcpy(s, 
+         strlcpy(s,
                msg_hash_to_str(
                   MENU_ENUM_LABEL_VALUE_SHADER_PIPELINE_RIBBON_SIMPLIFIED), len);
          break;
       case XMB_SHADER_PIPELINE_RIBBON:
-         strlcpy(s, 
+         strlcpy(s,
                msg_hash_to_str(
                   MENU_ENUM_LABEL_VALUE_SHADER_PIPELINE_RIBBON), len);
          break;
@@ -314,7 +307,7 @@ static void menu_action_setting_disp_set_label_shader_default_filter(
       return;
 
    if (settings->video.smooth)
-      strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LINEAR), len); 
+      strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_LINEAR), len);
    else
       strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_NEAREST), len);
 }
@@ -342,7 +335,7 @@ static void menu_action_setting_disp_set_label_shader_parameter(
    if (!shader_info.data)
       return;
 
-   param = &shader_info.data->parameters[type - 
+   param = &shader_info.data->parameters[type -
       MENU_SETTINGS_SHADER_PARAMETER_0];
 
    if (!param)
@@ -454,11 +447,11 @@ static void menu_action_setting_disp_set_label_input_desc(
       const char *path,
       char *s2, size_t len2)
 {
-   char descriptor[PATH_MAX_LENGTH];
+   char descriptor[255];
    const struct retro_keybind *auto_bind = NULL;
    const struct retro_keybind *keybind   = NULL;
    settings_t *settings                  = config_get_ptr();
-   unsigned inp_desc_index_offset        = 
+   unsigned inp_desc_index_offset        =
       type - MENU_SETTINGS_INPUT_DESC_BEGIN;
    unsigned inp_desc_user                = inp_desc_index_offset /
       (RARCH_FIRST_CUSTOM_BIND + 4);
@@ -468,7 +461,9 @@ static void menu_action_setting_disp_set_label_input_desc(
 
    if (!settings)
       return;
-   
+
+   descriptor[0] = '\0';
+
    remap_id = settings->input.remap_ids
       [inp_desc_user][inp_desc_button_index_offset];
 
@@ -484,19 +479,39 @@ static void menu_action_setting_disp_set_label_input_desc(
    {
       if(strstr(descriptor, "Auto") && !strstr(descriptor,
                msg_hash_to_str(MENU_ENUM_LABEL_VALUE_NOT_AVAILABLE)))
-         strlcpy(s, 
+         strlcpy(s,
             descriptor,
             len);
       else
-         strlcpy(s, 
-            settings->input.binds[inp_desc_user][remap_id].desc,
+         strlcpy(s,
+            msg_hash_to_str(settings->input.binds[inp_desc_user][remap_id].enum_idx),
             len);
    }
 
 
 
    else
-      strlcpy(s, axis_labels[remap_id], len);
+   {
+      const char *str = NULL;
+      switch (remap_id)
+      {
+         case 0:
+            str = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_LEFT_X);
+            break;
+         case 1:
+            str = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_LEFT_Y);
+            break;
+         case 2:
+            str = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_RIGHT_X);
+            break;
+         case 3:
+            str = msg_hash_to_str(MENU_ENUM_LABEL_VALUE_INPUT_ANALOG_RIGHT_Y);
+            break;
+      }
+
+      if (!string_is_empty(str))
+         strlcpy(s, str, len);
+   }
 
    *w = 19;
    strlcpy(s2, path, len2);
@@ -517,9 +532,9 @@ static void menu_action_setting_disp_set_label_cheat(
    if (cheat_index < cheat_manager_get_buf_size())
       snprintf(s, len, "%s : (%s)",
             (cheat_manager_get_code(cheat_index) != NULL)
-            ? cheat_manager_get_code(cheat_index) : 
+            ? cheat_manager_get_code(cheat_index) :
             msg_hash_to_str(MENU_ENUM_LABEL_VALUE_NOT_AVAILABLE),
-            cheat_manager_get_code_state(cheat_index) ? 
+            cheat_manager_get_code_state(cheat_index) ?
             msg_hash_to_str(MENU_ENUM_LABEL_VALUE_ON) :
             msg_hash_to_str(MENU_ENUM_LABEL_VALUE_OFF)
             );
@@ -606,6 +621,34 @@ static void menu_action_setting_disp_set_label_menu_more(
 {
    strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_MORE), len);
    *w = 19;
+   strlcpy(s2, path, len2);
+}
+
+static void menu_action_setting_disp_set_label_db_entry(
+      file_list_t* list,
+      unsigned *w, unsigned type, unsigned i,
+      const char *label,
+      char *s, size_t len,
+      const char *entry_label,
+      const char *path,
+      char *s2, size_t len2)
+{
+   strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_MORE), len);
+   *w = 10;
+   strlcpy(s2, path, len2);
+}
+
+static void menu_action_setting_disp_set_label_entry(
+      file_list_t* list,
+      unsigned *w, unsigned type, unsigned i,
+      const char *label,
+      char *s, size_t len,
+      const char *entry_label,
+      const char *path,
+      char *s2, size_t len2)
+{
+   *s = '\0';
+   *w = 8;
    strlcpy(s2, path, len2);
 }
 
@@ -700,11 +743,35 @@ static void menu_action_setting_disp_set_label_xmb_theme(
          strlcpy(s,
                msg_hash_to_str(MENU_ENUM_LABEL_VALUE_XMB_ICON_THEME_PIXEL), len);
          break;
+      case XMB_ICON_THEME_NEOACTIVE:
+         strlcpy(s,
+               msg_hash_to_str(MENU_ENUM_LABEL_VALUE_XMB_ICON_THEME_NEOACTIVE), len);
+         break;
+      case XMB_ICON_THEME_MONOCHROME_JAGGED:
+         strlcpy(s,
+               msg_hash_to_str(MENU_ENUM_LABEL_VALUE_XMB_ICON_THEME_MONOCHROME_JAGGED), len);
+	 break;
       case XMB_ICON_THEME_CUSTOM:
          strlcpy(s,
                msg_hash_to_str(MENU_ENUM_LABEL_VALUE_XMB_ICON_THEME_CUSTOM), len);
          break;
    }
+}
+
+static void menu_action_setting_disp_set_label_wifi_is_online(
+      file_list_t* list,
+      unsigned *w, unsigned type, unsigned i,
+      const char *label,
+      char *s, size_t len,
+      const char *entry_label,
+      const char *path,
+      char *s2, size_t len2)
+{
+   strlcpy(s2, path, len2);
+   *w = 19;
+
+   if (driver_wifi_ssid_is_online(i))
+      strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_ONLINE), len);
 }
 
 static void menu_action_setting_disp_set_label_xmb_menu_color_theme(
@@ -877,7 +944,7 @@ static void menu_action_setting_disp_set_label_thumbnails(
                   MENU_ENUM_LABEL_VALUE_THUMBNAIL_MODE_SCREENSHOTS), len);
          break;
       case 2:
-         strlcpy(s, 
+         strlcpy(s,
                msg_hash_to_str(
                   MENU_ENUM_LABEL_VALUE_THUMBNAIL_MODE_TITLE_SCREENS), len);
          break;
@@ -1324,7 +1391,6 @@ static void menu_action_setting_disp_set_label_core_option_create(
       char *s2, size_t len2)
 {
    rarch_system_info_t *system = NULL;
-   global_t            *global = global_get_ptr();
 
    runloop_ctl(RUNLOOP_CTL_SYSTEM_INFO_GET, &system);
    if (!system)
@@ -1335,8 +1401,8 @@ static void menu_action_setting_disp_set_label_core_option_create(
 
    strlcpy(s, "", len);
 
-   if (!string_is_empty(global->name.base))
-      strlcpy(s,  path_basename(global->name.base), len);
+   if (!string_is_empty(path_get(RARCH_PATH_BASENAME)))
+      strlcpy(s,  path_basename(path_get(RARCH_PATH_BASENAME)), len);
 
    strlcpy(s2, path, len2);
 }
@@ -1349,7 +1415,7 @@ static void menu_action_setting_disp_set_label_playlist_associations(file_list_t
       const char *path,
       char *s2, size_t len2)
 {
-   char playlist_name_with_ext[PATH_MAX_LENGTH] = {0};
+   char playlist_name_with_ext[255];
    bool found_matching_core_association         = false;
    settings_t         *settings                 = config_get_ptr();
    struct string_list *str_list                 = string_split(settings->playlist_names, ";");
@@ -1357,6 +1423,7 @@ static void menu_action_setting_disp_set_label_playlist_associations(file_list_t
 
    strlcpy(s2, path, len2);
 
+   playlist_name_with_ext[0] = '\0';
    *s = '\0';
    *w = 19;
 
@@ -1426,42 +1493,6 @@ static void menu_action_setting_disp_set_label_core_options(file_list_t* list,
    strlcpy(s2, path, len2);
 }
 
-static void menu_action_setting_disp_set_label_content_history(
-      file_list_t* list,
-      unsigned *w, unsigned type, unsigned i,
-      const char *label,
-      char *s, size_t len,
-      const char *entry_label,
-      const char *path,
-      char *s2, size_t len2)
-{
-   *s = '\0';
-   *w = 19;
-
-   menu_setting_get_label(list, s,
-         len, w, type, label, entry_label, i);
-
-   strlcpy(s2, path, len2);
-}
-
-static void menu_action_setting_disp_set_label_system_information(
-      file_list_t* list,
-      unsigned *w, unsigned type, unsigned i,
-      const char *label,
-      char *s, size_t len,
-      const char *entry_label,
-      const char *path,
-      char *s2, size_t len2)
-{
-   *s = '\0';
-   *w = 2;
-
-   menu_setting_get_label(list, s,
-         len, w, type, label, entry_label, i);
-
-   strlcpy(s2, path, len2);
-}
-
 static void menu_action_setting_disp_set_label_achievement_information(
       file_list_t* list,
       unsigned *w, unsigned type, unsigned i,
@@ -1480,6 +1511,21 @@ static void menu_action_setting_disp_set_label_achievement_information(
    strlcpy(s2, path, len2);
 }
 
+static void menu_action_setting_disp_set_label_no_items(
+      file_list_t* list,
+      unsigned *w, unsigned type, unsigned i,
+      const char *label,
+      char *s, size_t len,
+      const char *entry_label,
+      const char *path,
+      char *s2, size_t len2)
+{
+   *s = '\0';
+   *w = 19;
+
+   strlcpy(s2, path, len2);
+}
+
 static void menu_action_setting_disp_set_label(file_list_t* list,
       unsigned *w, unsigned type, unsigned i,
       const char *label,
@@ -1493,6 +1539,66 @@ static void menu_action_setting_disp_set_label(file_list_t* list,
 
    menu_setting_get_label(list, s,
          len, w, type, label, entry_label, i);
+
+   strlcpy(s2, path, len2);
+}
+
+static void menu_action_setting_disp_set_label_setting_bool(file_list_t* list,
+      unsigned *w, unsigned type, unsigned i,
+      const char *label,
+      char *s, size_t len,
+      const char *entry_label,
+      const char *path,
+      char *s2, size_t len2)
+{
+   rarch_setting_t *setting = menu_setting_find(list->list[i].label);
+
+   *s = '\0';
+   *w = 19;
+
+   if (setting)
+   {
+      if (*setting->value.target.boolean)
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_ON), len);
+      else
+         strlcpy(s, msg_hash_to_str(MENU_ENUM_LABEL_VALUE_OFF), len);
+   }
+
+   strlcpy(s2, path, len2);
+}
+
+static void menu_action_setting_disp_set_label_setting_string(file_list_t* list,
+      unsigned *w, unsigned type, unsigned i,
+      const char *label,
+      char *s, size_t len,
+      const char *entry_label,
+      const char *path,
+      char *s2, size_t len2)
+{
+   rarch_setting_t *setting = menu_setting_find(list->list[i].label);
+
+   *w = 19;
+
+   strlcpy(s, setting->value.target.string, len);
+
+   strlcpy(s2, path, len2);
+}
+
+static void menu_action_setting_disp_set_label_setting_path(file_list_t* list,
+      unsigned *w, unsigned type, unsigned i,
+      const char *label,
+      char *s, size_t len,
+      const char *entry_label,
+      const char *path,
+      char *s2, size_t len2)
+{
+   rarch_setting_t *setting = menu_setting_find(list->list[i].label);
+   const char *basename     = setting ? path_basename(setting->value.target.string) : NULL;
+
+   *w = 19;
+
+   if (!string_is_empty(basename))
+      strlcpy(s, basename, len);
 
    strlcpy(s2, path, len2);
 }
@@ -1515,6 +1621,10 @@ static int menu_cbs_init_bind_get_string_representation_compare_label(
          case MENU_ENUM_LABEL_XMB_THEME:
             BIND_ACTION_GET_VALUE(cbs,
                   menu_action_setting_disp_set_label_xmb_theme);
+            break;
+         case MENU_ENUM_LABEL_CONNECT_WIFI:
+            BIND_ACTION_GET_VALUE(cbs,
+                  menu_action_setting_disp_set_label_wifi_is_online);
             break;
          case MENU_ENUM_LABEL_XMB_MENU_COLOR_THEME:
             BIND_ACTION_GET_VALUE(cbs,
@@ -1604,6 +1714,7 @@ static int menu_cbs_init_bind_get_string_representation_compare_label(
          case MENU_ENUM_LABEL_CORE_INFORMATION:
          case MENU_ENUM_LABEL_SYSTEM_INFORMATION:
          case MENU_ENUM_LABEL_ACHIEVEMENT_LIST:
+         case MENU_ENUM_LABEL_ACHIEVEMENT_LIST_HARDCORE:
          case MENU_ENUM_LABEL_SAVE_STATE:
          case MENU_ENUM_LABEL_LOAD_STATE:
             BIND_ACTION_GET_VALUE(cbs,
@@ -1744,6 +1855,12 @@ static int menu_cbs_init_bind_get_string_representation_compare_type(
          case MENU_SETTING_SUBGROUP:
          case MENU_SETTINGS_CUSTOM_BIND_ALL:
          case MENU_SETTINGS_CUSTOM_BIND_DEFAULT_ALL:
+         case MENU_SETTING_ACTION:
+         case MENU_SETTING_ACTION_LOADSTATE:
+         case 7:   /* Run */
+         case MENU_SETTING_ACTION_DELETE_ENTRY:
+         case 117: /* Netplay settings */
+         case MENU_SETTING_ACTION_CORE_DISK_OPTIONS:
             BIND_ACTION_GET_VALUE(cbs,
                menu_action_setting_disp_set_label_menu_more);
             break;
@@ -1751,7 +1868,24 @@ static int menu_cbs_init_bind_get_string_representation_compare_type(
             BIND_ACTION_GET_VALUE(cbs,
                menu_action_setting_disp_set_label_menu_disk_index);
             break;
+         case 31: /* Database entry */
+            BIND_ACTION_GET_VALUE(cbs, menu_action_setting_disp_set_label_db_entry);
+            break;
+         case 25: /* URL directory entries */
+         case 26: /* URL entries */
+            BIND_ACTION_GET_VALUE(cbs, menu_action_setting_disp_set_label_entry);
+            break;
+         case MENU_SETTING_NO_ITEM:
+            BIND_ACTION_GET_VALUE(cbs, menu_action_setting_disp_set_label_no_items);
+            break;
+         case 32: /* Recent history entry */
+         case 65535: /* System info entry */
+            BIND_ACTION_GET_VALUE(cbs, menu_action_setting_disp_set_label_entry);
+            break;
          default:
+#if 0
+            RARCH_LOG("type: %d\n", type);
+#endif
             BIND_ACTION_GET_VALUE(cbs, menu_action_setting_disp_set_label);
             break;
       }
@@ -1766,6 +1900,38 @@ int menu_cbs_init_bind_get_string_representation(menu_file_list_cbs_t *cbs,
    if (!cbs)
       return -1;
 
+   if (strstr(label, "joypad_index") && strstr(label, "input_player"))
+   {
+      BIND_ACTION_GET_VALUE(cbs, menu_action_setting_disp_set_label);
+      return 0;
+   }
+
+#if 0
+   RARCH_LOG("MENU_SETTINGS_NONE: %d\n", MENU_SETTINGS_NONE);
+   RARCH_LOG("MENU_SETTINGS_LAST: %d\n", MENU_SETTINGS_LAST);
+#endif
+
+   if (cbs->setting)
+   {
+      switch (setting_get_type(cbs->setting))
+      {
+         case ST_BOOL:
+            BIND_ACTION_GET_VALUE(cbs,
+                  menu_action_setting_disp_set_label_setting_bool);
+            return 0;
+         case ST_STRING:
+            BIND_ACTION_GET_VALUE(cbs,
+                  menu_action_setting_disp_set_label_setting_string);
+            return 0;
+         case ST_PATH:
+            BIND_ACTION_GET_VALUE(cbs,
+                  menu_action_setting_disp_set_label_setting_path);
+            return 0;
+         default:
+            break;
+      }
+   }
+
    if (cbs->enum_idx != MSG_UNKNOWN)
    {
       switch (cbs->enum_idx)
@@ -1779,14 +1945,15 @@ int menu_cbs_init_bind_get_string_representation(menu_file_list_cbs_t *cbs,
                   menu_action_setting_disp_set_label_cheevos_locked_entry);
             return 0;
          case MENU_ENUM_LABEL_LOAD_CONTENT_HISTORY:
-            BIND_ACTION_GET_VALUE(cbs,
-                  menu_action_setting_disp_set_label_content_history);
-            return 0;
          case MENU_ENUM_LABEL_SYSTEM_INFORMATION:
             BIND_ACTION_GET_VALUE(cbs,
-                  menu_action_setting_disp_set_label_system_information);
+                  menu_action_setting_disp_set_label_menu_more);
             return 0;
          case MENU_ENUM_LABEL_ACHIEVEMENT_LIST:
+            BIND_ACTION_GET_VALUE(cbs,
+                  menu_action_setting_disp_set_label_achievement_information);
+            return 0;
+         case MENU_ENUM_LABEL_ACHIEVEMENT_LIST_HARDCORE:
             BIND_ACTION_GET_VALUE(cbs,
                   menu_action_setting_disp_set_label_achievement_information);
             return 0;
