@@ -901,7 +901,7 @@ ifeq ($(HAVE_VULKAN), 1)
    LIBS += -lstdc++
 endif
 
-ifeq ($(GLSL_OPTIMIZER), 1)
+ifeq ($(GLSL_OPT), 1)
    DEFINES += -DHAVE_GLSL
 
    SOURCES_C += \

@@ -234,6 +234,9 @@ VIDEO SHADERS
 
 #ifdef HAVE_GLSL
 #include "../gfx/drivers_shader/shader_glsl.c"
+#ifdef GLSL_OPT
+#include "../gfx/drivers_shader/glsl_optimizer.cpp"
+#endif
 #endif
 
 #endif

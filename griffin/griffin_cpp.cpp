@@ -82,7 +82,7 @@
 #endif
 #endif
 
-#ifdef GLSL_OPTIMIZER
+#ifdef GLSL_OPT
 #include "../gfx/drivers_shader/glsl_optimizer.cpp"
 #include "../deps/glsl-optimizer/src/glsl/opt_copy_propagation_elements.cpp"
 #include "../deps/glsl-optimizer/src/glsl/opt_constant_folding.cpp"
@@ -275,7 +275,7 @@ VIDEO DRIVER
 #include "../deps/SPIRV-Cross/spirv_cross.cpp"
 #endif
 
-#ifdef GLSL_OPTIMIZER
+#ifdef GLSL_OPT
 #include "../gfx/drivers_shader/glsl_optimizer.cpp"
 #endif
 

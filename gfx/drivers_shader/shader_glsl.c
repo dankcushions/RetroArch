@@ -38,7 +38,7 @@
 #include "../../managers/state_manager.h"
 #include "../../core.h"
 
-#ifdef GLSL_OPTIMIZER
+#ifdef GLSL_OPT
 #include "glsl_optimizer.h"
 #endif
 
@@ -292,7 +292,7 @@ static bool gl_glsl_compile_shader(glsl_shader_data_t *glsl,
    source[2] = glsl->alias_define;
    source[3] = program;
 
-#ifdef GLSL_OPTIMIZER
+#ifdef GLSL_OPT
 //#ifdef HAVE_OPENGLES
    // should target GLES versions, metal etc.
    RARCH_LOG("Optimizing shader using glsl-optimizer.\n");
@@ -724,7 +724,7 @@ static void gl_glsl_destroy_resources(glsl_shader_data_t *glsl)
    }
    memset(&glsl->vbo, 0, sizeof(glsl->vbo));
    
-#ifdef GLSL_OPTIMIZER
+#ifdef GLSL_OPT
    glslopt_cleanup(glsl_core);
 #endif
 }
