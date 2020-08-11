@@ -18507,6 +18507,12 @@ static bool dynamic_request_hw_context(enum retro_hw_context_type type,
 
 #if defined(HAVE_OPENGLES3)
       case RETRO_HW_CONTEXT_OPENGLES_VERSION:
+         if (major == 3 && minor == 2)
+         {
+            RARCH_ERR("Requesting OpenGLES%u.%u context, but device only supports OpenGLES3.1.\n",
+                   major, minor);
+            return false;
+         }
          RARCH_LOG("Requesting OpenGLES%u.%u context.\n",
                major, minor);
          break;
